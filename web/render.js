@@ -46,8 +46,14 @@
     uniform float u_streamHW;
     void main() {
       float l = texture2D(u_plant, v_uv).r;
-      vec3 bg = vec3(0.03, 0.05, 0.08);
-      vec3 food = vec3(0.10, 0.50, 0.20);
+      // Most of the map sits AT carrying capacity (l == 1), so the ceiling is
+      // what sets the mood, not the curve -- a bright peak paints the whole
+      // world one flat lawn and drowns the agents. Keep the peak a deep night
+      // forest and let the curve darken the mid densities, so grazed clearings
+      // and the agents both read clearly against it.
+      l = pow(l, 1.8);
+      vec3 bg = vec3(0.027, 0.039, 0.071);   // --void
+      vec3 food = vec3(0.045, 0.24, 0.105);
       vec3 col = bg + food * l;
 
       // meandering stream: a sine centerline in y as a function of x, matching
@@ -200,6 +206,22 @@
       const v = (bufYbot - vy) / vs;
       if (u < 0 || u > 1 || v < 0 || v > 1) return null;
       return [u * this._world, v * this._world];
+    },
+
+    // The square drawing area in CSS pixels relative to the canvas top-left.
+    // The world is letterboxed inside a non-square canvas, so overlays that need
+    // to hug the world (the sigil frame) can't just wrap #stage -- they align here.
+    viewportRect() {
+      const c = this.canvas;
+      const rect = c.getBoundingClientRect();
+      const [vx, vy, vs] = this._vp;
+      const sx = rect.width / (c.width || 1);
+      const sy = rect.height / (c.height || 1);
+      return {
+        x: vx * sx,
+        y: (c.height - vy - vs) * sy,   // GL origin is bottom-left
+        size: vs * sx,
+      };
     },
 
     // Returns pixel coords relative to the canvas top-left (for overlays).

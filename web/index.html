@@ -3,94 +3,243 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Underworld</title>
+  <title>UNDERWORLD · 人工摇光沙盒</title>
   <style>
-    :root { color-scheme: dark; }
+    /* ------------------------------------------------------------------
+       神聖術 / 公理教会: the dashboard as an observation sigil, not a
+       debug panel. Deep indigo void, cold fluctlight white, gilt reserved
+       for section marks. Species colours are locked to render.js's shader
+       constants -- if you change one, change both.
+       ------------------------------------------------------------------ */
+    :root {
+      color-scheme: dark;
+      --void:   #070a12;
+      --stone:  #0d1220;
+      --rule:   #1b2440;
+      --sacred: #cfe4ff;
+      --dim:    #6b7c9e;
+      --halo:   #4a97ea;   /* validated: passes all six dataviz checks on --stone */
+      --gold:   #d9b26a;
+      --herb:   #9e52eb;   /* == render.js vec3(0.62, 0.32, 0.92) */
+      --carn:   #f24038;   /* == render.js vec3(0.95, 0.25, 0.22) */
+      --omni:   #9fb2d0;   /* neutral midpoint of the diverging diet scale */
+      --plant:  #1a8033;   /* == render.js food vec3(0.10, 0.50, 0.20) */
+
+      --display: "Noto Serif CJK SC", "Songti SC", serif;
+      --ui: "Noto Sans CJK SC", system-ui, sans-serif;
+      --mono: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; background: #06080c; color: #cdd6e0;
-      font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    html, body {
+      margin: 0; height: 100%;
+      background: var(--void); color: var(--sacred);
+      font: 13px/1.55 var(--ui);
+      -webkit-font-smoothing: antialiased;
+    }
     #app { display: flex; height: 100%; }
-    #stage { flex: 1; position: relative; min-width: 0; }
+
+    /* ---------- stage: the world, framed as an observation sigil ---------- */
+    /* padding leaves room for the sigil's corner ticks and its caption to sit
+       outside the world square instead of being clipped against the edge */
+    #stage { flex: 1; position: relative; min-width: 0; padding: 18px 18px 34px;
+      background:
+        radial-gradient(ellipse at 50% 45%, #0c1226 0%, var(--void) 72%); }
     #view { width: 100%; height: 100%; display: block; cursor: crosshair; }
-    #ring { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px;
-      border: 2px solid #fff; border-radius: 50%; pointer-events: none;
-      box-shadow: 0 0 8px #000; display: none; }
-    #side { width: 268px; padding: 16px; border-left: 1px solid #17202b;
-      background: #0a0e14; display: flex; flex-direction: column; gap: 13px;
-      overflow-y: auto; }
-    h1 { font-size: 15px; margin: 0; letter-spacing: 1px; color: #e8eef5; }
-    .sub { color: #5c6b7a; font-size: 11px; margin-top: 2px; }
-    .row { display: flex; justify-content: space-between; }
-    .k { color: #6c7c8c; }
-    .v { color: #e8eef5; font-variant-numeric: tabular-nums; }
-    button { width: 100%; padding: 8px; background: #14202e; color: #cdd6e0;
-      border: 1px solid #23384c; border-radius: 6px; cursor: pointer; font: inherit; }
-    button:hover { background: #1b2c3e; }
-    button.primary { background: #1f6f43; border-color: #2c8f57; color: #eafff2; }
-    input[type=range] { width: 100%; }
-    .panel { border: 1px solid #17202b; border-radius: 8px; padding: 10px; }
-    .lbl { color: #6c7c8c; font-size: 11px; letter-spacing: 1px; margin-bottom: 6px; }
-    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-      background: #b04a4a; margin-right: 6px; vertical-align: middle; }
-    .dot.on { background: #3fb56a; }
-    .legend { display: flex; gap: 12px; font-size: 11px; color: #8a99a8; flex-wrap: wrap; }
-    .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
-      margin-right: 5px; vertical-align: middle; }
-    #inspector .row { margin: 1px 0; }
-    #itype { font-size: 13px; font-weight: bold; }
-    .bar { height: 6px; border-radius: 3px; margin-top: 4px;
-      background: linear-gradient(90deg, #9b5de5, #e6d64b, #e8443b); position: relative; }
-    .bar > i { position: absolute; top: -3px; width: 2px; height: 12px;
-      background: #fff; box-shadow: 0 0 4px #000; }
-    .muted { color: #55636f; }
+
+    /* Aligned every frame to Renderer.viewportRect() -- the world letterboxes
+       to a centred square, so this can't just wrap #stage. */
+    #sigil { position: absolute; pointer-events: none;
+      border: 1px solid var(--rule); }
+    #sigil::before { content: ""; position: absolute; inset: 5px;
+      border: 1px solid rgba(74, 151, 234, 0.14); }
+    #sigil .cnr { position: absolute; width: 13px; height: 13px;
+      border: 0 solid var(--gold); opacity: 0.55; }
+    #sigil .tl { top: -1px; left: -1px;  border-top-width: 1px; border-left-width: 1px; }
+    #sigil .tr { top: -1px; right: -1px; border-top-width: 1px; border-right-width: 1px; }
+    #sigil .bl { bottom: -1px; left: -1px;  border-bottom-width: 1px; border-left-width: 1px; }
+    #sigil .br { bottom: -1px; right: -1px; border-bottom-width: 1px; border-right-width: 1px; }
+    #sigilcap { position: absolute; left: 0; right: 0; bottom: -25px;
+      text-align: center; font-family: var(--display); font-size: 11px;
+      letter-spacing: 0.42em; color: var(--dim); text-indent: 0.42em; }
+
+    #ring { position: absolute; width: 24px; height: 24px; margin: -12px 0 0 -12px;
+      border: 1.5px solid var(--sacred); border-radius: 50%; pointer-events: none;
+      box-shadow: 0 0 10px rgba(207,228,255,.55), inset 0 0 6px rgba(207,228,255,.25);
+      display: none; animation: pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { transform: scale(1.18); opacity: .65; } }
+
+    /* ---------- sidebar: read top-to-bottom as one liturgy ---------- */
+    #side { width: 320px; flex: none; padding: 20px 18px 26px;
+      border-left: 1px solid var(--rule); background: var(--stone);
+      display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
+
+    .mark { font-family: var(--display); font-size: 22px; letter-spacing: .12em;
+      margin: 0; color: var(--sacred); }
+    .mark-sub { font-family: var(--display); font-size: 11px; color: var(--gold);
+      letter-spacing: .46em; margin-top: 5px; text-indent: .46em; opacity: .85; }
+    .status { margin-top: 9px; font-size: 11px; color: var(--dim);
+      display: flex; align-items: center; gap: 7px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--carn);
+      flex: none; }
+    .dot.on { background: var(--halo); box-shadow: 0 0 7px var(--halo); }
+
+    /* section eyebrow: gilt serif + a hairline that runs to the edge */
+    .eyebrow { font-family: var(--display); font-size: 10px; color: var(--gold);
+      letter-spacing: .4em; text-indent: .4em; opacity: .8;
+      display: flex; align-items: center; gap: 11px; margin-bottom: 13px; }
+    .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+    .row { display: flex; justify-content: space-between; align-items: baseline;
+      gap: 10px; padding: 2px 0; }
+    .k { color: var(--dim); font-size: 12px; }
+    .v { color: var(--sacred); font-family: var(--mono); font-size: 12px;
+      font-variant-numeric: tabular-nums; }
+
+    button { width: 100%; padding: 9px 10px; background: transparent;
+      color: var(--sacred); border: 1px solid var(--rule); border-radius: 2px;
+      cursor: pointer; font: 12px/1.4 var(--ui); letter-spacing: .16em;
+      transition: background .16s, border-color .16s; }
+    button:hover { background: rgba(74,151,234,.09); border-color: var(--halo); }
+    button:focus-visible { outline: 2px solid var(--halo); outline-offset: 2px; }
+    button.primary { border-color: rgba(74,151,234,.5);
+      background: rgba(74,151,234,.12); color: #e4f0ff; }
+
+    input[type=range] { width: 100%; accent-color: var(--halo); margin: 2px 0 0; }
+    input[type=range]:focus-visible { outline: 2px solid var(--halo); outline-offset: 3px; }
+
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px;
+      color: var(--dim); }
+    .sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      margin-right: 6px; vertical-align: middle; }
+
+    /* ---------- sparklines ---------- */
+    .spark { margin-top: 11px; }
+    .spark:first-of-type { margin-top: 0; }
+    .sparkhead { display: flex; justify-content: space-between; align-items: baseline;
+      gap: 8px; margin-bottom: 3px; }
+    .sparkhead .k { font-size: 11px; }
+    .sparkc { display: block; width: 100%; height: 34px; }
+    .dual { display: flex; gap: 11px; font-family: var(--mono); font-size: 11px;
+      font-variant-numeric: tabular-nums; color: var(--sacred); }
+    .win { font-size: 10px; color: var(--dim); margin-top: 9px;
+      padding-top: 8px; border-top: 1px solid var(--rule); }
+
+    /* ---------- inspector ---------- */
+    #itype { font-size: 14px; font-family: var(--display); letter-spacing: .06em; }
+    .empty { color: var(--dim); font-size: 12px; font-family: var(--ui);
+      letter-spacing: 0; line-height: 1.6; }
+    /* diverging diet scale: two hues, neutral midpoint (never a hue at centre) */
+    .bar { height: 4px; border-radius: 2px; margin-top: 9px; position: relative;
+      background: linear-gradient(90deg, var(--herb), var(--omni), var(--carn)); }
+    .bar > i { position: absolute; top: -4px; width: 2px; height: 12px;
+      background: var(--sacred); box-shadow: 0 0 5px var(--void);
+      transition: left .2s ease-out; }
+    #retina { display: block; margin: 0 auto; }
+    #neurons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+      width: 88px; margin: 0 auto; }
+    #neurons div { aspect-ratio: 1; border-radius: 1px;
+      box-shadow: inset 0 0 0 1px var(--rule); }
+    .gap { height: 12px; }
+
+    /* ---------- entrance: one orchestrated moment, then stillness ---------- */
+    @media (prefers-reduced-motion: no-preference) {
+      #side > * { animation: rise .5s cubic-bezier(.2,.7,.3,1) backwards; }
+      #side > :nth-child(1) { animation-delay: .04s; }
+      #side > :nth-child(2) { animation-delay: .10s; }
+      #side > :nth-child(3) { animation-delay: .16s; }
+      #side > :nth-child(4) { animation-delay: .22s; }
+      #side > :nth-child(5) { animation-delay: .28s; }
+      #sigil { animation: bloom .8s ease-out backwards; }
+      @keyframes rise { from { opacity: 0; transform: translateY(7px); } }
+      @keyframes bloom { from { opacity: 0; } }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #ring { animation: none; }
+      .bar > i { transition: none; }
+    }
+
+    /* ---------- narrow: sidebar drops below the world ---------- */
+    @media (max-width: 900px) {
+      #app { flex-direction: column; }
+      #stage { min-height: 58vh; }
+      #side { width: 100%; border-left: 0; border-top: 1px solid var(--rule); }
+    }
   </style>
 </head>
 <body>
   <div id="app">
     <div id="stage">
       <canvas id="view"></canvas>
+      <div id="sigil" aria-hidden="true">
+        <span class="cnr tl"></span><span class="cnr tr"></span>
+        <span class="cnr bl"></span><span class="cnr br"></span>
+        <div id="sigilcap">观 测 法 阵</div>
+      </div>
       <div id="ring"></div>
     </div>
-    <div id="side">
+
+    <aside id="side">
       <div>
-        <h1>UNDERWORLD</h1>
-        <div class="sub">摇光沙盒 · 食物链</div>
-        <div class="sub"><span class="dot" id="conn"></span><span id="conntxt">连接中…</span></div>
+        <h1 class="mark">UNDERWORLD</h1>
+        <div class="mark-sub">人工摇光沙盒</div>
+        <div class="status"><span class="dot" id="conn"></span><span id="conntxt">连接中…</span></div>
       </div>
 
-      <div class="panel">
-        <button id="play" class="primary">⏸ 暂停</button>
-        <div style="height:8px"></div>
-        <div class="lbl">加速倍率 · 每帧 <span id="speedval" class="v">4</span> 步</div>
-        <input id="speed" type="range" min="0" max="8" value="2" />
-        <div style="height:8px"></div>
-        <button id="reset">⟲ 重置世界</button>
-      </div>
+      <section>
+        <div class="eyebrow">系统指令</div>
+        <button id="play" class="primary">停止时间流</button>
+        <div class="gap"></div>
+        <div class="row"><span class="k">FLA 加速率</span><span class="v"><span id="speedval">4</span> 步/帧</span></div>
+        <input id="speed" type="range" min="0" max="8" value="2" aria-label="FLA 加速率" />
+        <div class="gap"></div>
+        <button id="reset">重构世界</button>
+      </section>
 
-      <div class="panel">
-        <div class="legend">
-          <span><span class="sw" style="background:#9b5de5"></span>草食动物</span>
-          <span><span class="sw" style="background:#e6d64b"></span>杂食动物</span>
-          <span><span class="sw" style="background:#e8443b"></span>肉食动物</span>
+      <section>
+        <div class="eyebrow">世界观测</div>
+        <div class="legend" style="margin-bottom:13px">
+          <span><span class="sw" style="background:var(--herb)"></span>草食</span>
+          <span><span class="sw" style="background:var(--omni)"></span>杂食</span>
+          <span><span class="sw" style="background:var(--carn)"></span>肉食</span>
         </div>
-      </div>
 
-      <div class="panel">
-        <div class="lbl">种群</div>
-        <div class="row"><span class="k">存活数量</span><span class="v" id="pop">–</span></div>
-        <div class="row"><span class="k">肉食比例</span><span class="v" id="carn">–</span></div>
-        <div class="row"><span class="k">平均食性</span><span class="v" id="diet">–</span></div>
-        <div class="row"><span class="k">平均能量</span><span class="v" id="energy">–</span></div>
-        <div class="row"><span class="k">平均水分</span><span class="v" id="water">–</span></div>
-        <div class="row"><span class="k">平均年龄</span><span class="v" id="age">–</span></div>
-        <div class="row"><span class="k">植物总量</span><span class="v" id="plant">–</span></div>
-      </div>
+        <div class="spark">
+          <div class="sparkhead"><span class="k">种群</span><span class="v" id="sv_pop">–</span></div>
+          <canvas class="sparkc" id="sp_pop"></canvas>
+        </div>
+        <div class="spark">
+          <div class="sparkhead"><span class="k">肉食比例</span><span class="v" id="sv_carn">–</span></div>
+          <canvas class="sparkc" id="sp_carn"></canvas>
+        </div>
+        <div class="spark">
+          <div class="sparkhead"><span class="k">食性分化 σ</span><span class="v" id="sv_std">–</span></div>
+          <canvas class="sparkc" id="sp_std"></canvas>
+        </div>
+        <div class="spark">
+          <div class="sparkhead"><span class="k">植物总量</span><span class="v" id="sv_plant">–</span></div>
+          <canvas class="sparkc" id="sp_plant"></canvas>
+        </div>
+        <div class="spark">
+          <div class="sparkhead">
+            <span class="k">移动速度</span>
+            <span class="dual">
+              <span><span class="sw" style="background:var(--carn)"></span><span id="sv_cv">–</span></span>
+              <span><span class="sw" style="background:var(--herb)"></span><span id="sv_hv">–</span></span>
+            </span>
+          </div>
+          <canvas class="sparkc" id="sp_vel"></canvas>
+        </div>
 
-      <div class="panel" id="inspector">
-        <div class="lbl">个体检视器</div>
-        <div id="itype" class="muted">点击一个个体</div>
+        <div class="win">窗口 <span id="winlen">–</span> 步 · 平均食性 <span id="diet">–</span>
+          · 平均能量 <span id="energy">–</span> · 平均水分 <span id="water">–</span>
+          · 平均年龄 <span id="age">–</span></div>
+      </section>
+
+      <section id="inspector">
+        <div class="eyebrow">摇光解析</div>
+        <div id="itype" class="empty">在世界中点选一个个体，解析它的摇光</div>
         <div class="bar"><i id="ibar" style="left:0%"></i></div>
-        <div style="height:8px"></div>
+        <div class="gap"></div>
         <div class="row"><span class="k">编号</span><span class="v" id="i_id">–</span></div>
         <div class="row"><span class="k">食性</span><span class="v" id="i_diet">–</span></div>
         <div class="row"><span class="k">能量</span><span class="v" id="i_energy">–</span></div>
@@ -103,29 +252,30 @@
         <div class="row"><span class="k">受到伤害</span><span class="v" id="i_dmg">–</span></div>
         <div class="row"><span class="k">饮水量</span><span class="v" id="i_drink">–</span></div>
 
-        <div style="height:10px"></div>
-        <div class="lbl">摇光 · 视网膜(它看到的)</div>
-        <canvas id="retina" width="150" height="150" style="display:block;margin:0 auto"></canvas>
-        <div class="legend" style="justify-content:center;margin-top:4px">
-          <span><span class="sw" style="background:#50dc5a"></span>食物</span>
-          <span><span class="sw" style="background:#50c8e6"></span>猎物</span>
-          <span><span class="sw" style="background:#eb4640"></span>威胁</span>
-          <span><span class="sw" style="background:#468ceb"></span>水源</span>
+        <div class="gap"></div>
+        <div class="eyebrow" style="margin-top:4px">视网膜</div>
+        <canvas id="retina" width="164" height="164"></canvas>
+        <div class="legend" style="justify-content:center;margin-top:7px">
+          <span><span class="sw" style="background:#4fd66a"></span>食物</span>
+          <span><span class="sw" style="background:#4fc6e6"></span>猎物</span>
+          <span><span class="sw" style="background:var(--carn)"></span>威胁</span>
+          <span><span class="sw" style="background:var(--halo)"></span>水源</span>
         </div>
-        <div style="height:8px"></div>
-        <div class="lbl">神经元(记忆状态)</div>
-        <div id="neurons" style="display:flex;flex-wrap:wrap;gap:3px"></div>
-        <div style="height:8px"></div>
+
+        <div class="gap"></div>
+        <div class="eyebrow">记忆神经元</div>
+        <div id="neurons"></div>
+        <div class="gap"></div>
         <div class="row"><span class="k">转向</span><span class="v" id="i_turn">–</span></div>
         <div class="row"><span class="k">推进力</span><span class="v" id="i_thrust">–</span></div>
-      </div>
+      </section>
 
-      <div class="panel">
-        <div class="lbl">渲染</div>
+      <section>
+        <div class="eyebrow">渲染</div>
         <div class="row"><span class="k">帧率</span><span class="v" id="fps">–</span></div>
         <div class="row"><span class="k">帧数</span><span class="v" id="frame">–</span></div>
-      </div>
-    </div>
+      </section>
+    </aside>
   </div>
   <script src="render.js"></script>
   <script src="main.js"></script>

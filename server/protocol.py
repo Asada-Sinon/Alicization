@@ -2,7 +2,7 @@
 
 One message per frame, little-endian:
 
-    header (60 bytes):
+    header (72 bytes):
         magic             4s   b"UNDW"
         frame             u32
         n_agents          u32
@@ -14,6 +14,9 @@ One message per frame, little-endian:
         mean_diet         f32
         carn_frac         f32
         mean_water        f32
+        diet_std          f32
+        carn_speed        f32
+        herb_speed        f32
         stream_amplitude  f32
         stream_wavenumber f32
         stream_base_y     f32
@@ -26,6 +29,11 @@ the dashboard can follow / inspect a selected individual. Only living agents are
 sent, so payload tracks the population. The stream geometry fields are constant
 per run but sent every frame anyway -- cheap, and keeps the client from having to
 duplicate `Config`'s stream constants.
+
+`diet_std` / `carn_speed` / `herb_speed` are the evolution telemetry the dashboard
+plots as time series: a high diet_std means the herbivore/carnivore split is still
+cleanly bimodal, and carn_speed climbing toward herb_speed means carnivores are
+evolving active pursuit rather than sitting still and ambushing.
 """
 
 from __future__ import annotations
@@ -35,7 +43,7 @@ import struct
 import numpy as np
 
 MAGIC = b"UNDW"
-_HEADER = struct.Struct("<4sIII fffffffffff")
+_HEADER = struct.Struct("<4sIII ffffffffffffff")
 
 
 def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
@@ -55,6 +63,9 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
         float(metrics.get("mean_diet", 0.0)),
         float(metrics.get("carnivore_frac", 0.0)),
         float(metrics.get("mean_water", 0.0)),
+        float(metrics.get("diet_std", 0.0)),
+        float(metrics.get("carn_speed", 0.0)),
+        float(metrics.get("herb_speed", 0.0)),
         float(stream_amplitude), float(stream_wavenumber),
         float(stream_base_y), float(stream_half_width),
     )
