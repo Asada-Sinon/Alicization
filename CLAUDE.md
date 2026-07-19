@@ -43,6 +43,25 @@ Commit as you finish each coherent piece of work rather than letting changes pil
 push to `origin main` once the relevant checks below pass. Prefer several small
 commits over one large one.
 
+**Commit messages are written in Chinese** — both the subject line and the body.
+This is the project's convention; follow it even when the conversation is in
+English. Two things stay as they are:
+
+- the `Co-Authored-By:` trailer, which is parsed by tooling, not read as prose
+- identifiers quoted from the code (`carn_cost`, `world_step`, `UNTR`, file paths),
+  which are names, not description — don't translate them
+
+The bar for the body is the same as it would be in English: say *why* the change
+was made and what was measured, not just what was touched.
+
+```
+为地形系统增加山脉、河流与森林
+
+将世界扩大到 512²，让"待在哪里"本身成为值得演化的决策……
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+```
+
 Before committing, make sure the work actually holds:
 
 ```bash
