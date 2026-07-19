@@ -14,18 +14,23 @@ import numpy as np
 import pytest
 
 from underworld import Config, new_world
+from underworld import terrain as terrain_mod
 from underworld.state import init_state
 
 
 # Small, fast config for tests.
 def tiny_cfg(**kw):
-    base = dict(n_max=256, n_init=64, grid=16, seed=1)
+    # A small *world*, not just a small grid: terrain lengths are fractions of
+    # world_size, but the plant cell must stay comparable to river_half_width or
+    # no cell centre ever registers as water and everything dies of thirst.
+    base = dict(n_max=256, n_init=64, world_size=128.0, grid=32,
+                sense_grid=6, seed=1)
     base.update(kw)
     return Config(**base)
 
 
 def run(cfg, n_steps, key_seed=0):
-    state, key, step_fn, scan_fn = new_world(cfg)
+    state, key, step_fn, scan_fn, _terrain = new_world(cfg)
     state, key, ms = scan_fn(state, key, n_steps)
     return state, ms
 
@@ -33,7 +38,7 @@ def run(cfg, n_steps, key_seed=0):
 def test_shapes():
     cfg = tiny_cfg()
     key = jax.random.PRNGKey(0)
-    s = init_state(cfg, key)
+    s = init_state(cfg, key, terrain_mod.build(cfg))
     assert s.alive.shape == (cfg.n_max,)
     assert s.pos.shape == (cfg.n_max, 2)
     assert s.genome.shape == (cfg.n_max, cfg.genome_size)
@@ -91,9 +96,8 @@ def test_different_seed_diverges():
 def test_neighbor_index():
     """Hand-checked: clustered agents see each other, distant ones don't."""
     from underworld import spatial
-    from underworld.state import init_state
     cfg = tiny_cfg(n_max=64, n_init=3, sense_grid=4, k_neighbors=8)
-    s = init_state(cfg, jax.random.PRNGKey(0))
+    s = init_state(cfg, jax.random.PRNGKey(0), terrain_mod.build(cfg))
     pos = np.array(s.pos)
     pos[0] = [10.0, 10.0]
     pos[1] = [12.0, 11.0]          # ~2 units from agent 0

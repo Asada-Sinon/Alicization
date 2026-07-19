@@ -25,7 +25,7 @@ def main(total_steps: int = 4000, chunk: int = 200) -> None:
     print(f"device: {jax.devices()[0]}")
     print(f"genome_size={cfg.genome_size}  n_max={cfg.n_max}  n_cells={cfg.n_cells}")
 
-    state, key, _step, scan_fn = new_world(cfg)
+    state, key, _step, scan_fn, _terrain = new_world(cfg)
 
     # Warm up / compile on a single chunk and time it.
     t0 = time.time()

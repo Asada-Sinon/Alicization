@@ -9,22 +9,36 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .ecology import in_stream
 from .state import WorldState, pos_to_cell
 
 
-def act(state: WorldState, outputs: jax.Array, cfg: Config):
-    """Apply brain outputs. Returns (new_state, thrust) where thrust in [0, 1]."""
+def act(state: WorldState, outputs: jax.Array, terrain, cfg: Config):
+    """Apply brain outputs. Returns (new_state, thrust, climb) where thrust is in
+    [0, 1] and `climb` is the elevation *gained* this step (>= 0), which
+    `metabolize` charges for.
+
+    Dense canopy slows movement: forest is food-rich but hard to cross, so it's a
+    genuine trade-off rather than a free bonus.
+    """
     turn = outputs[:, 0] * cfg.max_turn                 # [-max_turn, max_turn]
     thrust = 0.5 * (outputs[:, 1] + 1.0)                # [0, 1]
 
+    cell = pos_to_cell(state.pos, cfg)
+    slow = 1.0 - cfg.forest_slow * terrain.forest[cell]
+
     heading = jnp.mod(state.heading + turn * cfg.dt, 2.0 * jnp.pi)
-    speed = thrust * cfg.max_speed
+    speed = thrust * cfg.max_speed * slow
     vel = jnp.stack([jnp.cos(heading), jnp.sin(heading)], axis=1) * speed[:, None]
     vel = vel * state.alive[:, None]                    # the dead don't drift
     pos = jnp.mod(state.pos + vel * cfg.dt, cfg.world_size)
 
-    return state._replace(heading=heading, vel=vel, pos=pos), thrust
+    # Elevation gained along the displacement, from the terrain gradient at the
+    # cell we left. Uphill only -- descending is free, but must never *produce*
+    # energy or agents would farm the slope by running downhill forever.
+    dh = (terrain.grad_x[cell] * vel[:, 0] + terrain.grad_y[cell] * vel[:, 1]) * cfg.dt
+    climb = jnp.maximum(dh, 0.0) * state.alive
+
+    return state._replace(heading=heading, vel=vel, pos=pos), thrust, climb
 
 
 def graze(state: WorldState, cfg: Config):
@@ -55,12 +69,18 @@ def graze(state: WorldState, cfg: Config):
     return energy, plant, gain
 
 
-def drink(state: WorldState, cfg: Config):
-    """Hydration: standing in the stream refills water, uncapped by any shared
-    demand pool (a flowing stream isn't meaningfully depleted at this scale, only
-    spatially constrained). Returns (water, drink_gain).
+def drink(state: WorldState, terrain, cfg: Config):
+    """Hydration: standing in a river or at the sea refills water, uncapped by any
+    shared demand pool (flowing water isn't meaningfully depleted at this scale,
+    only spatially constrained). Returns (water, drink_gain).
+
+    This is now a lookup into the precomputed `water_dist` field rather than the
+    old analytic sine -- cheaper per step, and it works for the traced rivers and
+    the sea alike.
     """
-    gain = jnp.where(in_stream(state.pos, cfg), cfg.drink_rate, 0.0) * state.alive
+    cell = pos_to_cell(state.pos, cfg)
+    in_water = terrain.water_dist[cell] < cfg.river_half_width
+    gain = jnp.where(in_water, cfg.drink_rate, 0.0) * state.alive
     water = jnp.minimum(state.water + gain, cfg.water_max)
     return water, gain
 
@@ -117,13 +137,15 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
 
 
 def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
-               alive: jax.Array, cfg: Config) -> jax.Array:
-    """Charge the per-step energy cost of existing, moving, and (for carnivores)
-    hunting. The diet-scaled term makes pure carnivory unsustainable when prey is
-    scarce -- the feedback that keeps herbivores and carnivores coexisting.
+               climb: jax.Array, alive: jax.Array, cfg: Config) -> jax.Array:
+    """Charge the per-step energy cost of existing, moving, climbing, and (for
+    carnivores) hunting. The diet-scaled term makes pure carnivory unsustainable
+    when prey is scarce -- the feedback that keeps herbivores and carnivores
+    coexisting. The climb term is work against gravity, proportional to elevation
+    gained, which is what makes the range a soft barrier rather than a wall.
     """
     cost = (cfg.base_cost + cfg.move_cost * thrust + cfg.carn_cost * diet) * alive
-    return energy - cost
+    return energy - cost - cfg.climb_cost * climb
 
 
 def thirst(water: jax.Array, thrust: jax.Array, alive: jax.Array,

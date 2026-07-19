@@ -13,30 +13,33 @@ import dataclasses
 @dataclasses.dataclass(frozen=True)
 class Config:
     # --- world ---
-    world_size: float = 256.0      # square torus edge length (world units)
-    grid: int = 64                 # plant field is grid x grid cells
+    world_size: float = 512.0      # square torus edge length (world units)
+    grid: int = 128                # plant field is grid x grid cells
     dt: float = 0.2                # seconds per step
 
     # --- spatial neighbour index (M1) ---
-    sense_grid: int = 12           # binning grid for neighbour queries
+    sense_grid: int = 24           # binning grid for neighbour queries. MUST scale
+    #                                with world_size: the sense cell must stay >=
+    #                                vision_radius, or cells hold more agents than
+    #                                k_neighbors and the overflow is silently
+    #                                dropped -- invisible to both vision and predation.
     k_neighbors: int = 24          # max agents stored per sense-cell
     vision_radius: float = 21.0    # perception radius (<= sense cell size)
     attack_range: float = 6.0      # carnivore bite range (short = prey refuge)
     diet_delta: float = 0.15       # prey must be this much more herbivorous
 
     # --- population (fixed-capacity arrays) ---
-    n_max: int = 8192              # hard cap on simultaneous agents
-    n_init: int = 1200             # initial living agents. Water is a second,
-    #                                 geographically scarce resource (the stream
-    #                                 covers ~8% of the map) on top of food, so the
-    #                                 long-run equilibrium (~250-330) is much lower
-    #                                 than this. Seeding directly at that lower
-    #                                 count starves the carnivore *founder* pool
-    #                                 (~5% of n_init) into early stochastic
-    #                                 extinction -- tried n_init=280, carnivores
-    #                                 died out by step 800. Seeding high and
-    #                                 letting it cull down (verified stable to 30k
-    #                                 steps) is safer than a snappier reset.
+    n_max: int = 16384             # hard cap on simultaneous agents
+    n_init: int = 2000             # initial living agents. There is a sweet spot
+    #                                 here and it is narrow in BOTH directions.
+    #                                 Seed too close to the ~700 equilibrium and the
+    #                                 carnivore founder pool is too small to survive
+    #                                 its own stochasticity (an earlier build died
+    #                                 out by step 800 at n_init=280). Seed far above
+    #                                 it and the die-off itself does the killing:
+    #                                 at n_init=4800 the 7x crash wiped carnivores
+    #                                 on every seed tested. 2000 against ~700 is the
+    #                                 gentle-crash regime.
 
     # --- brain (fixed-topology recurrent net; weights live in the genome) ---
     # inputs: per retina sector [food, prey, predator] + [own_energy, own_diet].
@@ -52,8 +55,13 @@ class Config:
     max_turn: float = 3.0          # radians / second
     base_cost: float = 0.02        # energy / step just to exist
     move_cost: float = 0.05        # extra energy / step at full thrust
-    carn_cost: float = 0.15        # extra upkeep scaled by diet: idle predators
-    #                                die back fast, coupling their numbers to prey
+    carn_cost: float = 0.10        # extra upkeep scaled by diet: idle predators
+    #                                die back fast, coupling their numbers to prey.
+    #                                Was 0.15 in the flat 256^2 world; the terrain
+    #                                world charges predators for climbing and slows
+    #                                them in cover, and at 0.15 they went extinct on
+    #                                every seed tested. 0.10 restores a ~15% carnivore
+    #                                fraction (measured over 3 seeds).
 
     # --- feeding: herbivory (plant field) ---
     eat_rate: float = 1.5          # max plant energy an agent drains / step
@@ -73,12 +81,62 @@ class Config:
     #                                 the attacker at the same pred_efficiency --
     #                                 a kill hydrates as well as feeds.
 
-    # --- water (a meandering stream; a separate resource from food) ---
-    stream_amplitude: float = 40.0    # meander amplitude, world units
-    stream_wavenumber: int = 2        # whole sine periods across world_size (must
-    #                                    be an integer so the torus seam is seamless)
-    stream_base_y: float = 128.0      # centerline mean y
-    stream_half_width: float = 10.0   # half-width of the drinkable band
+    # --- terrain: one elevation field drives mountains, rivers and forest ---
+    # h(x,y) = H_local(x) * exp(-d_ridge^2 / 2*sigma^2)          <- the range
+    #          - basin_depth * ((1 - cos(pi*d/half_L)) / 2)^p    <- regional drainage
+    # The ridge centerline reuses the sine-in-y-of-x form the old stream used, so
+    # an integer wavenumber keeps it seamless across the torus seam.
+    # World-scale lengths are stored as *fractions of world_size* so the whole
+    # geography scales with the map: change world_size alone and the range stays
+    # proportionate instead of silently degenerating. (Agent-scale lengths --
+    # vision, river width, step length -- stay absolute, since those are set by
+    # the creatures, not the map.)
+    ridge_base_frac: float = 0.5      # centerline mean y, as a fraction of world
+    ridge_amp_frac: float = 0.117     # meander amplitude, fraction of world
+    ridge_wavenumber: int = 1         # whole periods across world_size (integer!)
+    ridge_height: float = 1.0         # peak elevation
+    ridge_sigma_frac: float = 0.066   # gaussian half-width, fraction of world
+    ridge_peak_wavenumber: int = 5    # peaks along the range (integer!)
+    ridge_peak_depth: float = 0.45    # how far passes drop below peak height.
+    #                                   These passes are the cheap crossings --
+    #                                   migration routes should emerge at them.
+    basin_depth: float = 0.25         # elevation drop from ridge to the antipodal sea
+    basin_power: float = 3.0          # >1 keeps the plains flat and the sea narrow
+    sea_level: float = -0.20          # cells below this are open water (drinkable)
+
+    # --- rivers: traced once at init by steepest descent from the ridge ---
+    n_rivers: int = 6                 # NOT an aesthetic choice -- a full tank at
+    #                                   full thrust only covers ~229 world units,
+    #                                   so a single river would leave lethal dead
+    #                                   zones at 512^2. Six sources spread along
+    #                                   the range keep every cell within reach.
+    river_steps: int = 400            # traced points per river (static shape)
+    river_step_len: float = 2.0       # world units per descent step
+    river_half_width: float = 8.0     # half-width of the drinkable band
+
+    # --- forest: mid-elevation, near water ---
+    forest_elev: float = 0.10         # elevation the canopy peaks at
+    forest_elev_sigma: float = 0.18   # elevation band half-width
+    forest_water_frac: float = 0.117  # canopy decay length away from water,
+    #                                   as a fraction of world_size
+    grass_base: float = 0.65          # open-ground fertility (fraction of plant_max)
+    forest_bonus: float = 0.35        # extra fertility under full canopy
+    forest_slow: float = 0.25         # speed penalty at full canopy
+    forest_occlusion: float = 0.35    # vision-radius penalty at full canopy. Note
+    #                                   attack_range is deliberately NOT reduced:
+    #                                   short sight + unchanged reach is what makes
+    #                                   forest genuine ambush cover.
+
+    # --- bare rock: nothing grows on the peaks ---
+    rock_h0: float = 0.45             # elevation where fertility starts to fail
+    rock_h1: float = 0.75             # elevation where it reaches bare rock
+
+    # --- movement over terrain ---
+    climb_cost: float = 3.0           # energy per unit of elevation gained. Uphill
+    #                                   only: downhill is free but never generates
+    #                                   energy, which would be an exploit.
+
+    # --- water (a separate resource from food) ---
     water_init: float = 8.0
     water_max: float = 10.0           # hydration cap
     water_scale: float = 10.0         # normalizer for the own-water sensor input
@@ -139,10 +197,32 @@ class Config:
         return self.world_size / self.grid
 
     @property
+    def half_world(self) -> float:
+        """Greatest possible torus distance along one axis."""
+        return self.world_size / 2.0
+
+    # World-scale terrain lengths, resolved to world units.
+    @property
+    def ridge_base_y(self) -> float:
+        return self.ridge_base_frac * self.world_size
+
+    @property
+    def ridge_amplitude(self) -> float:
+        return self.ridge_amp_frac * self.world_size
+
+    @property
+    def ridge_sigma(self) -> float:
+        return self.ridge_sigma_frac * self.world_size
+
+    @property
+    def forest_water_scale(self) -> float:
+        return self.forest_water_frac * self.world_size
+
+    @property
     def in_dim(self) -> int:
-        """Retina channels (food/prey/predator/water per sector) + energy + diet
-        + own water."""
-        return 4 * self.retina_sectors + 3
+        """Retina channels (food/prey/predator/water/slope per sector) + energy
+        + diet + own water."""
+        return 5 * self.retina_sectors + 3
 
     @property
     def brain_params(self) -> int:

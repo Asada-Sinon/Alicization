@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import WorldState
+from .state import WorldState, pos_to_cell
 
 
 class Metrics(NamedTuple):
@@ -24,12 +24,15 @@ class Metrics(NamedTuple):
     carn_speed: jax.Array       # mean |vel| of carnivores (diet > 0.65): ambush vs pursuit tell
     herb_speed: jax.Array       # mean |vel| of herbivores (diet < 0.35)
     mean_water: jax.Array       # hydration level, separate resource from energy
+    mean_elevation: jax.Array   # mean terrain height under the population
+    forest_frac: jax.Array      # fraction of the population standing under canopy
 
 
-def compute(state: WorldState, cfg: Config) -> Metrics:
+def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
     alive = state.alive.astype(jnp.float32)
     pop = jnp.sum(alive)
     denom = jnp.maximum(pop, 1.0)
+    cell = pos_to_cell(state.pos, cfg)
 
     mean_diet = jnp.sum(state.diet * alive) / denom
     diet_var = jnp.sum(((state.diet - mean_diet) ** 2) * alive) / denom
@@ -51,4 +54,6 @@ def compute(state: WorldState, cfg: Config) -> Metrics:
         carn_speed=jnp.sum(speed * is_carn) / carn_n,
         herb_speed=jnp.sum(speed * is_herb) / herb_n,
         mean_water=jnp.sum(state.water * alive) / denom,
+        mean_elevation=jnp.sum(terrain.height[cell] * alive) / denom,
+        forest_frac=jnp.sum((terrain.forest[cell] > 0.5) * alive) / denom,
     )

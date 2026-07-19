@@ -43,12 +43,28 @@ def diet_of(genome: jax.Array, cfg: Config) -> jax.Array:
     return jax.nn.sigmoid(genome[:, cfg.diet_index])
 
 
-def init_state(cfg: Config, key: jax.Array) -> WorldState:
-    k_pos, k_head, k_gen, k_hue, k_plant, k_carn = jax.random.split(key, 6)
+def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
+    k_pos, k_head, k_gen, k_hue, k_plant, k_carn, k_rej = jax.random.split(key, 7)
     n = cfg.n_max
 
     alive = jnp.arange(n) < cfg.n_init
-    pos = jax.random.uniform(k_pos, (n, 2), maxval=cfg.world_size)
+
+    # Founders are placed by rejection sampling against terrain fertility, so
+    # nobody starts stranded on bare rock or in open water with nothing to eat.
+    # Fixed number of proposals keeps the shape static.
+    def propose(i, acc):
+        pos_i, best_i = acc
+        k = jax.random.fold_in(k_rej, i)
+        cand = jax.random.uniform(k, (n, 2), maxval=cfg.world_size)
+        score = terrain.capacity[pos_to_cell(cand, cfg)]
+        take = score > best_i
+        return (jnp.where(take[:, None], cand, pos_i),
+                jnp.where(take, score, best_i))
+
+    pos0 = jax.random.uniform(k_pos, (n, 2), maxval=cfg.world_size)
+    pos, _ = jax.lax.fori_loop(
+        0, 6, propose, (pos0, terrain.capacity[pos_to_cell(pos0, cfg)])
+    )
     heading = jax.random.uniform(k_head, (n,), maxval=2.0 * jnp.pi)
     vel = jnp.zeros((n, 2))
     energy = jnp.where(alive, cfg.energy_init, 0.0)
@@ -67,11 +83,12 @@ def init_state(cfg: Config, key: jax.Array) -> WorldState:
     diet = diet_of(genome, cfg)
     zeros = jnp.zeros(n)
 
-    # Patchy initial plant field: random per-cell energy around the mean.
+    # Patchy initial plant field, scaled by what each cell can actually support:
+    # forest starts lush, plains moderate, rock and sea bare.
     plant = jax.random.uniform(
         k_plant, (cfg.n_cells,), minval=0.0, maxval=2.0 * cfg.plant_init
     )
-    plant = jnp.clip(plant, 0.0, cfg.plant_max)
+    plant = jnp.minimum(plant * (terrain.capacity / cfg.plant_max), terrain.capacity)
 
     return WorldState(
         alive=alive, pos=pos, heading=heading, vel=vel, energy=energy, water=water,
