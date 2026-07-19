@@ -35,38 +35,51 @@
       gl_Position = vec4(a_quad, 0.0, 1.0);
     }`;
 
+  // Terrain arrives once as a static texture (height / forest / water in r,g,b),
+  // so the client no longer duplicates any world-generation formula -- there is
+  // nothing here that has to be kept in sync with the Python side.
   const PLANT_FS = `
     precision mediump float;
     varying vec2 v_uv;
     uniform sampler2D u_plant;
-    uniform float u_world;
-    uniform float u_streamAmp;
-    uniform float u_streamK;
-    uniform float u_streamBaseY;
-    uniform float u_streamHW;
+    uniform sampler2D u_terrain;
+    uniform float u_texel;
     void main() {
+      vec3 t = texture2D(u_terrain, v_uv).rgb;
+      float h = t.r, forest = t.g, water = t.b;
+
       float l = texture2D(u_plant, v_uv).r;
-      // Most of the map sits AT carrying capacity (l == 1), so the ceiling is
-      // what sets the mood, not the curve -- a bright peak paints the whole
-      // world one flat lawn and drowns the agents. Keep the peak a deep night
-      // forest and let the curve darken the mid densities, so grazed clearings
-      // and the agents both read clearly against it.
+      // Most vegetated ground sits AT its carrying capacity, so the ceiling sets
+      // the mood, not the curve -- a bright peak paints one flat lawn and drowns
+      // the agents. Keep the peak a deep night forest.
       l = pow(l, 1.8);
       vec3 bg = vec3(0.027, 0.039, 0.071);   // --void
-      vec3 food = vec3(0.045, 0.24, 0.105);
-      vec3 col = bg + food * l;
+      vec3 col = bg + vec3(0.045, 0.24, 0.105) * l;
 
-      // meandering stream: a sine centerline in y as a function of x, matching
-      // ecology.stream_dist -- blended in as a soft-edged blue band.
-      float x = v_uv.x * u_world;
-      float y = v_uv.y * u_world;
-      float centerY = u_streamBaseY +
-        u_streamAmp * sin(6.28318530718 * u_streamK * x / u_world);
-      float dy = abs(y - centerY);
-      dy = min(dy, u_world - dy);
-      float t = clamp(1.0 - dy / u_streamHW, 0.0, 1.0);
-      vec3 water = vec3(0.10, 0.38, 0.68);
-      col = mix(col, water, t * 0.9);
+      // canopy reads darker and colder than open grass, so the forest belt is
+      // legible as terrain rather than just "more food"
+      col = mix(col, vec3(0.014, 0.112, 0.072), forest * 0.7);
+
+      // Bare rock takes over as the ground climbs. Deliberately a dark slate:
+      // a light rock colour plus the relief highlight below turns every peak
+      // into a glossy pale blob instead of a mountain.
+      float rock = smoothstep(0.62, 0.88, h);
+      col = mix(col, vec3(0.115, 0.112, 0.135), rock);
+
+      // Relief shading: slope against a fixed light, so the range reads as 3D.
+      // Sampling the height plane itself means no formula is duplicated. Kept
+      // asymmetric -- shadows may go deep, highlights stay restrained, which is
+      // what stops the peaks blowing out.
+      float hL = texture2D(u_terrain, v_uv - vec2(u_texel, 0.0)).r;
+      float hR = texture2D(u_terrain, v_uv + vec2(u_texel, 0.0)).r;
+      float hD = texture2D(u_terrain, v_uv - vec2(0.0, u_texel)).r;
+      float hU = texture2D(u_terrain, v_uv + vec2(0.0, u_texel)).r;
+      vec2 slope = vec2(hR - hL, hU - hD);
+      float shade = clamp(dot(normalize(vec2(-0.7, 0.7)), slope) * 7.0, -0.55, 0.30);
+      col *= (1.0 + shade);
+
+      // rivers and sea last, so water always wins over whatever it covers
+      col = mix(col, vec3(0.10, 0.38, 0.68), water * 0.92);
 
       gl_FragColor = vec4(col, 1.0);
     }`;
@@ -121,15 +134,38 @@
       gl.bufferData(gl.ARRAY_BUFFER,
         new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
 
-      this.tex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, this.tex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const mkTex = () => {
+        const t = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, t);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        return t;
+      };
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      this.tex = mkTex();            // plant field, re-uploaded every frame
+      this.terrainTex = mkTex();     // static terrain, uploaded once per world
+      this.terrainGrid = 0;
 
       this.agentBuf = gl.createBuffer();
+    },
+
+    // Static terrain: three grid*grid u8 planes packed into one RGB texture.
+    // Called once when the terrain message arrives (and again after a reset).
+    setTerrain(grid, height, forest, water) {
+      const gl = this.gl;
+      const n = grid * grid;
+      const rgb = new Uint8Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        rgb[i * 3] = height[i];
+        rgb[i * 3 + 1] = forest[i];
+        rgb[i * 3 + 2] = water[i];
+      }
+      gl.bindTexture(gl.TEXTURE_2D, this.terrainTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, grid, grid, 0,
+        gl.RGB, gl.UNSIGNED_BYTE, rgb);
+      this.terrainGrid = grid;
     },
 
     resize() {
@@ -155,17 +191,20 @@
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.viewport(vx, vy, vs, vs);
 
-      // --- plant background (+ stream overlay) ---
+      // --- terrain + plant background ---
+      if (!this.terrainGrid) return;   // nothing sensible to draw until terrain lands
       gl.useProgram(this.plantProg);
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.tex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, snap.grid, snap.grid, 0,
         gl.LUMINANCE, gl.UNSIGNED_BYTE, snap.plant);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.terrainTex);
       gl.uniform1i(gl.getUniformLocation(this.plantProg, "u_plant"), 0);
-      gl.uniform1f(gl.getUniformLocation(this.plantProg, "u_world"), snap.world);
-      gl.uniform1f(gl.getUniformLocation(this.plantProg, "u_streamAmp"), snap.streamAmp);
-      gl.uniform1f(gl.getUniformLocation(this.plantProg, "u_streamK"), snap.streamK);
-      gl.uniform1f(gl.getUniformLocation(this.plantProg, "u_streamBaseY"), snap.streamBaseY);
-      gl.uniform1f(gl.getUniformLocation(this.plantProg, "u_streamHW"), snap.streamHW);
+      gl.uniform1i(gl.getUniformLocation(this.plantProg, "u_terrain"), 1);
+      gl.uniform1f(gl.getUniformLocation(this.plantProg, "u_texel"),
+        1.0 / this.terrainGrid);
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
       const qloc = gl.getAttribLocation(this.plantProg, "a_quad");
       gl.enableVertexAttribArray(qloc);

@@ -29,7 +29,7 @@ from underworld import Config, new_world
 class Simulation:
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.state, self.key, self.step_fn, self.scan_fn = new_world(cfg)
+        self.state, self.key, self.step_fn, self.scan_fn, self.terrain = new_world(cfg)
         self.playing = True
         self.speed = 4            # sim steps per rendered frame (the FLA dial)
         self.frame = 0
@@ -39,6 +39,17 @@ class Simulation:
         self.selected: int | None = None   # slot id being inspected
         self.detail: str | None = None      # JSON detail for the selected agent
         self._reset = False
+        self.terrain_epoch = 0             # bumped on reset so viewers re-fetch
+        self._encode_terrain()
+
+    def _encode_terrain(self):
+        """Terrain is static per world, so encode it once and hand the same bytes
+        to every viewer that connects."""
+        t = self.terrain
+        self.terrain_msg = protocol.encode_terrain(
+            np.asarray(t.height), np.asarray(t.forest), np.asarray(t.water_dist),
+            self.cfg.grid, self.cfg.world_size, self.cfg.river_half_width,
+        )
 
     def _advance(self):
         """Runs in an executor thread (JAX releases the GIL during device work)."""
@@ -54,8 +65,6 @@ class Simulation:
             np.asarray(s.alive), np.asarray(s.pos), np.asarray(s.diet),
             np.asarray(s.energy), np.asarray(s.plant),
             self.cfg.grid, self.cfg.world_size, self.cfg.plant_max, self.metrics,
-            self.cfg.stream_amplitude, self.cfg.stream_wavenumber,
-            self.cfg.stream_base_y, self.cfg.stream_half_width,
         )
         self.detail = self._build_detail() if self.selected is not None else None
 
@@ -105,9 +114,12 @@ class Simulation:
         while True:
             t0 = time.time()
             if self._reset:
-                self.state, self.key, self.step_fn, self.scan_fn = new_world(self.cfg)
+                (self.state, self.key, self.step_fn, self.scan_fn,
+                 self.terrain) = new_world(self.cfg)
                 self.total_steps = 0
                 self._reset = False
+                self._encode_terrain()
+                self.terrain_epoch += 1
                 self._build_snapshot()
             if self.playing:
                 await loop.run_in_executor(None, self._advance)
@@ -156,8 +168,15 @@ async def ws(websocket: WebSocket):
 
     recv_task = asyncio.create_task(receiver())
     last_frame = -1
+    # Terrain first: the client needs the map before the first snapshot means
+    # anything. Re-sent whenever a reset rebuilds the world.
+    await websocket.send_bytes(sim.terrain_msg)
+    last_epoch = sim.terrain_epoch
     try:
         while True:
+            if sim.terrain_epoch != last_epoch:
+                last_epoch = sim.terrain_epoch
+                await websocket.send_bytes(sim.terrain_msg)
             if sim.frame != last_frame and sim.snapshot:
                 last_frame = sim.frame
                 await websocket.send_bytes(sim.snapshot)

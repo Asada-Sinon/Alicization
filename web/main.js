@@ -5,7 +5,7 @@
 
   const SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
   const STRIDE = 5;              // floats per agent: x, y, diet, energy, id
-  const HEADER_BYTES = 72;       // protocol v4
+  const HEADER_BYTES = 64;       // protocol v5
   const PICK_RADIUS = 6.0;       // world units
   const HIST = 600;              // samples kept per series (~20s at 30fps)
 
@@ -37,7 +37,7 @@
 
   // --- history ring buffers (client-side; the server streams only "now") ---
   const hist = {
-    pop: [], carn: [], std: [], plant: [], cv: [], hv: [],
+    pop: [], carn: [], std: [], plant: [], cv: [], hv: [], fst: [],
   };
   function pushHistory(s) {
     const add = (key, v) => {
@@ -51,6 +51,7 @@
     add("plant", s.plantTotal);
     add("cv", s.carnSpeed);
     add("hv", s.herbSpeed);
+    add("fst", s.forestFrac);
   }
   function clearHistory() {
     for (const k in hist) hist[k].length = 0;
@@ -64,8 +65,17 @@
     ws.onclose = () => { setConn(false); setTimeout(connect, 1000); };
     ws.onerror = () => ws.close();
     ws.onmessage = (ev) => {
-      if (typeof ev.data === "string") updateInspector(JSON.parse(ev.data));
-      else { latest = parse(ev.data); pushHistory(latest); }
+      if (typeof ev.data === "string") { updateInspector(JSON.parse(ev.data)); return; }
+      // Terrain and snapshots share the socket; tell them apart by magic rather
+      // than by length, which would break the moment the grid size changed.
+      const magic = new Uint8Array(ev.data, 0, 4);
+      if (magic[0] === 85 && magic[1] === 78 && magic[2] === 84 && magic[3] === 82) {
+        const t = parseTerrain(ev.data);          // "UNTR"
+        Renderer.setTerrain(t.grid, t.height, t.forest, t.water);
+        return;
+      }
+      latest = parse(ev.data);
+      pushHistory(latest);
     };
   }
 
@@ -89,15 +99,27 @@
     const dietStd = dv.getFloat32(44, true);
     const carnSpeed = dv.getFloat32(48, true);
     const herbSpeed = dv.getFloat32(52, true);
-    const streamAmp = dv.getFloat32(56, true);
-    const streamK = dv.getFloat32(60, true);
-    const streamBaseY = dv.getFloat32(64, true);
-    const streamHW = dv.getFloat32(68, true);
+    const meanElev = dv.getFloat32(56, true);
+    const forestFrac = dv.getFloat32(60, true);
     const agents = new Float32Array(buffer, HEADER_BYTES, n * STRIDE);
     const plant = new Uint8Array(buffer, HEADER_BYTES + n * STRIDE * 4, grid * grid);
     return { frame, n, grid, world, agents, plant, meanEnergy, plantTotal,
       meanAge, meanDiet, carnFrac, meanWater, dietStd, carnSpeed, herbSpeed,
-      streamAmp, streamK, streamBaseY, streamHW };
+      meanElev, forestFrac };
+  }
+
+  // Static terrain, sent once per world: 12-byte header then three u8 planes.
+  function parseTerrain(buffer) {
+    const dv = new DataView(buffer);
+    const grid = dv.getUint32(4, true);
+    const world = dv.getFloat32(8, true);
+    const n = grid * grid;
+    return {
+      grid, world,
+      height: new Uint8Array(buffer, 12, n),
+      forest: new Uint8Array(buffer, 12 + n, n),
+      water: new Uint8Array(buffer, 12 + 2 * n, n),
+    };
   }
 
   function send(msg) {
@@ -254,6 +276,8 @@
       { data: hist.cv, color: C.carn },
       { data: hist.hv, color: C.herb },
     ], { min: 0, fmt: (x) => x.toFixed(1) });
+    drawSparkline($("sp_forest"), [{ data: hist.fst, color: C.plant, fill: true }],
+      { min: 0, max: 1, fmt: pct });
   }
 
   // --- inspector panel ---
@@ -433,6 +457,8 @@
       $("sv_plant").textContent = fmt(latest.plantTotal, 0);
       $("sv_cv").textContent = fmt(latest.carnSpeed, 1);
       $("sv_hv").textContent = fmt(latest.herbSpeed, 1);
+      $("sv_forest").textContent = pct(latest.forestFrac);
+      $("elev").textContent = fmt(latest.meanElev, 2);
       $("diet").textContent = fmt(latest.meanDiet, 2);
       $("energy").textContent = fmt(latest.meanEnergy, 2);
       $("water").textContent = fmt(latest.meanWater, 2);

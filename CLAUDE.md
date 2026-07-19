@@ -78,6 +78,35 @@ Per-step order matters and is easy to get wrong when editing:
 6. `reproduction.cull` (death) → `reproduce` (birth)
 7. `ecology.regrow`, and `diet` is re-cached from the genome
 
+### Terrain is static, and derived from one elevation field
+
+`underworld/terrain.py` builds every map field **once** in `build(cfg)`:
+mountains are a gaussian ridge along a meandering centerline; rivers are the
+steepest-descent paths of that field traced with `lax.scan` from sources near the
+crest; forest is what grows at mid elevation within reach of water; the plant
+carrying capacity is derived from forest and bare rock. They are three
+consequences of one model, not three pasted-on rules.
+
+`new_world` returns `(state, key, step_fn, scan_fn, terrain)` and the terrain is
+**closed over** by `build_step`, not stored in `WorldState` — putting it in the
+state would copy several `[n_cells]` fields through every `lax.scan` step for no
+reason. Nothing in `terrain.py` runs per step.
+
+Two scaling rules the config enforces:
+
+- **World-scale lengths are fractions of `world_size`** (`ridge_sigma_frac`,
+  `ridge_amp_frac`, …) so changing the map size keeps the geography proportionate.
+  Agent-scale lengths (`vision_radius`, `river_half_width`, `attack_range`) stay
+  absolute — those are set by the creatures, not the map.
+- **`sense_grid` must scale with `world_size`** so a sense cell stays ≥
+  `vision_radius`. Too small and agents outside the 3×3 block are invisible; too
+  large and cells exceed `k_neighbors` and the overflow is silently dropped from
+  both vision and predation. `test_sense_cell_covers_vision_radius` guards this.
+
+Also note the plant grid cell must stay comparable to `river_half_width`: water is
+sampled at cell centres, so a coarse grid on a large world can leave *no* cell
+registering as water, and everything dies of thirst.
+
 ### Everything is fixed-shape tensors
 
 `WorldState` (`state.py`) is a `NamedTuple` pytree of `[n_max, ...]` arrays. Life and
@@ -117,19 +146,24 @@ Three places must change together:
 - `HEADER_BYTES` in `web/main.js`
 - every `dv.getFloat32(offset)` in `main.js` `parse()` **after** the insertion point
 
-Currently v4: 72-byte header. New metrics can be added without touching `server/app.py` —
+Currently v5: 64-byte header. New metrics can be added without touching `server/app.py` —
 `encode()` reads from a dict built by `metrics._asdict()`, so any field on `Metrics` is
 already available by name. Verify wire changes against a live server, not by reading;
 a bad offset produces plausible-looking wrong numbers, not an error.
+
+**Terrain travels in its own one-shot message** (`encode_terrain`, magic `UNTR`:
+12-byte header + three `grid²` u8 planes), sent on connect and after a reset, not
+per frame. `main.js` tells the two message types apart **by magic bytes, not by
+length** — length would break the moment the grid changed. The client uploads it
+as an RGB texture and the shader samples the height plane for relief, so no
+world-generation formula is duplicated in GLSL any more. (This replaced an earlier
+contract where the stream's sine formula had to be kept in sync between
+`ecology.py` and `PLANT_FS`.)
 
 **Species colours are duplicated in three files** and must match exactly:
 `web/render.js` shader constants (`vec3` literals), `web/index.html` `:root` custom
 properties, and the `C` object in `web/main.js`. Herbivore `#9e52eb` = `vec3(0.62,0.32,0.92)`,
 carnivore `#f24038` = `vec3(0.95,0.25,0.22)`. They were out of sync once already.
-
-**Stream geometry** is procedural, never stored: `ecology.stream_dist` computes it in
-Python/JAX and the `PLANT_FS` fragment shader recomputes the same sine formula. The four
-stream params ship in the header every frame so the client never hard-codes `Config`.
 
 ## Working on this codebase
 
@@ -139,6 +173,18 @@ comments recording what was tried and why values are where they are (`plant_max`
 changes have been tested and rejected because they drove carnivores extinct over 20k+
 steps. Don't retune casually; validate with a long `run_headless.py` run and watch
 `carn%`, `dietSD`, and `pop` for collapse, not just the first few hundred steps.
+
+**Never tune ecology on a single run.** Carnivore survival is a near-threshold
+stochastic process, and run-to-run variance is larger than most parameter effects.
+A config that looked clearly best on one seed scored 0% carnivores on all four
+seeds tested, while one that looked clearly worst averaged 2%+ — the entire
+first-pass conclusion was noise. Compare candidate configs across ≥3 seeds and
+look at the mean before believing any difference.
+
+**`n_init` has a sweet spot that is narrow in both directions.** Seed near the
+equilibrium and the carnivore founder pool is too small to survive its own
+stochasticity; seed far above it and the initial die-off does the killing (a 7×
+crash wiped carnivores on every seed). Roughly 3× the expected equilibrium works.
 
 **Verify GPU and canvas output by looking at it.** A shader bug that made the plant field
 render as a flat saturated slab shipped undetected for a long time because it was only
@@ -151,8 +197,8 @@ review does not.
 short horizon. For true bit-determinism run with
 `XLA_FLAGS=--xla_gpu_deterministic_ops=true`.
 
-**Known dead code:** `ecology.gradient` and `ecology.prey_field` are unused leftovers
-from the pre-retina scalar "smell" sensing.
+**Dead code note:** `ecology.prey_field` and the sine-stream helpers are gone;
+`ecology.gradient` is live again as the terrain slope operator.
 
 **`README.md` is stale** — it describes the M0 vertical slice (MLP brain, food-gradient
 sensing, asexual reproduction). The code has since gained a recurrent brain, retina

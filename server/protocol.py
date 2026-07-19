@@ -2,7 +2,7 @@
 
 One message per frame, little-endian:
 
-    header (72 bytes):
+    header (64 bytes):
         magic             4s   b"UNDW"
         frame             u32
         n_agents          u32
@@ -17,12 +17,16 @@ One message per frame, little-endian:
         diet_std          f32
         carn_speed        f32
         herb_speed        f32
-        stream_amplitude  f32
-        stream_wavenumber f32
-        stream_base_y     f32
-        stream_half_width f32
+        mean_elevation    f32
+        forest_frac       f32
     agents  (n_agents * 20 bytes): x f32, y f32, diet f32, energy f32, id f32
     plant   (grid*grid bytes):     u8, plant energy scaled to [0,255]
+
+Terrain is static for a whole run and travels in its own one-shot message
+(`encode_terrain`, magic b"UNTR"), sent on connect and after a reset, rather than
+being re-sent 30 times a second. The old sine-stream parameters are gone from the
+per-frame header with it -- the client reads the water layer off the terrain
+message now instead of recomputing a formula that had to be kept in sync.
 
 `id` is the agent's fixed slot index -- stable across frames while it lives, so
 the dashboard can follow / inspect a selected individual. Only living agents are
@@ -33,7 +37,8 @@ duplicate `Config`'s stream constants.
 `diet_std` / `carn_speed` / `herb_speed` are the evolution telemetry the dashboard
 plots as time series: a high diet_std means the herbivore/carnivore split is still
 cleanly bimodal, and carn_speed climbing toward herb_speed means carnivores are
-evolving active pursuit rather than sitting still and ambushing.
+evolving active pursuit rather than sitting still and ambushing. `mean_elevation`
+and `forest_frac` say where the population has chosen to live.
 """
 
 from __future__ import annotations
@@ -43,14 +48,39 @@ import struct
 import numpy as np
 
 MAGIC = b"UNDW"
-_HEADER = struct.Struct("<4sIII ffffffffffffff")
+TERRAIN_MAGIC = b"UNTR"
+_HEADER = struct.Struct("<4sIII ffffffffffff")
+_TERRAIN_HEADER = struct.Struct("<4sIf")
+
+
+def encode_terrain(height: np.ndarray, forest: np.ndarray, water_dist: np.ndarray,
+                   grid: int, world_size: float, river_half_width: float) -> bytes:
+    """One-shot static terrain: 12-byte header then three grid*grid u8 planes.
+
+    Sent once per world rather than per frame -- terrain never changes, and at
+    grid=128 this is ~49 KB that would otherwise be re-sent 30 times a second.
+
+    Planes are normalised to [0,255] for transport:
+        height  -- remapped from [min,max] to full range, so relief shading has
+                   contrast whatever the configured ridge height
+        forest  -- canopy density, already [0,1]
+        water   -- proximity, 255 at the waterline falling off over one bite of
+                   land, so the client can draw a soft shoreline
+    """
+    h = np.asarray(height, dtype=np.float32)
+    lo, hi = float(h.min()), float(h.max())
+    h_u8 = ((h - lo) / max(hi - lo, 1e-6) * 255.0).astype(np.uint8)
+    f_u8 = (np.clip(np.asarray(forest), 0.0, 1.0) * 255.0).astype(np.uint8)
+    w = 1.0 - np.clip(np.asarray(water_dist) / max(river_half_width, 1e-6), 0.0, 1.0)
+    w_u8 = (w * 255.0).astype(np.uint8)
+
+    header = _TERRAIN_HEADER.pack(TERRAIN_MAGIC, int(grid), float(world_size))
+    return header + h_u8.tobytes() + f_u8.tobytes() + w_u8.tobytes()
 
 
 def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
            energy: np.ndarray, plant: np.ndarray, grid: int, world_size: float,
-           plant_max: float, metrics: dict, stream_amplitude: float,
-           stream_wavenumber: float, stream_base_y: float,
-           stream_half_width: float) -> bytes:
+           plant_max: float, metrics: dict) -> bytes:
     idx = np.nonzero(alive)[0]
     n = int(idx.size)
 
@@ -66,8 +96,8 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
         float(metrics.get("diet_std", 0.0)),
         float(metrics.get("carn_speed", 0.0)),
         float(metrics.get("herb_speed", 0.0)),
-        float(stream_amplitude), float(stream_wavenumber),
-        float(stream_base_y), float(stream_half_width),
+        float(metrics.get("mean_elevation", 0.0)),
+        float(metrics.get("forest_frac", 0.0)),
     )
 
     agents = np.empty((n, 5), dtype="<f4")
