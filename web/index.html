@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Underworld</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #06080c; color: #cdd6e0;
+      font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    #app { display: flex; height: 100%; }
+    #stage { flex: 1; position: relative; min-width: 0; }
+    #view { width: 100%; height: 100%; display: block; cursor: crosshair; }
+    #ring { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+      border: 2px solid #fff; border-radius: 50%; pointer-events: none;
+      box-shadow: 0 0 8px #000; display: none; }
+    #side { width: 268px; padding: 16px; border-left: 1px solid #17202b;
+      background: #0a0e14; display: flex; flex-direction: column; gap: 13px;
+      overflow-y: auto; }
+    h1 { font-size: 15px; margin: 0; letter-spacing: 1px; color: #e8eef5; }
+    .sub { color: #5c6b7a; font-size: 11px; margin-top: 2px; }
+    .row { display: flex; justify-content: space-between; }
+    .k { color: #6c7c8c; }
+    .v { color: #e8eef5; font-variant-numeric: tabular-nums; }
+    button { width: 100%; padding: 8px; background: #14202e; color: #cdd6e0;
+      border: 1px solid #23384c; border-radius: 6px; cursor: pointer; font: inherit; }
+    button:hover { background: #1b2c3e; }
+    button.primary { background: #1f6f43; border-color: #2c8f57; color: #eafff2; }
+    input[type=range] { width: 100%; }
+    .panel { border: 1px solid #17202b; border-radius: 8px; padding: 10px; }
+    .lbl { color: #6c7c8c; font-size: 11px; letter-spacing: 1px; margin-bottom: 6px; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #b04a4a; margin-right: 6px; vertical-align: middle; }
+    .dot.on { background: #3fb56a; }
+    .legend { display: flex; gap: 12px; font-size: 11px; color: #8a99a8; flex-wrap: wrap; }
+    .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+      margin-right: 5px; vertical-align: middle; }
+    #inspector .row { margin: 1px 0; }
+    #itype { font-size: 13px; font-weight: bold; }
+    .bar { height: 6px; border-radius: 3px; margin-top: 4px;
+      background: linear-gradient(90deg, #9b5de5, #e6d64b, #e8443b); position: relative; }
+    .bar > i { position: absolute; top: -3px; width: 2px; height: 12px;
+      background: #fff; box-shadow: 0 0 4px #000; }
+    .muted { color: #55636f; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="stage">
+      <canvas id="view"></canvas>
+      <div id="ring"></div>
+    </div>
+    <div id="side">
+      <div>
+        <h1>UNDERWORLD</h1>
+        <div class="sub">摇光沙盒 · 食物链</div>
+        <div class="sub"><span class="dot" id="conn"></span><span id="conntxt">连接中…</span></div>
+      </div>
+
+      <div class="panel">
+        <button id="play" class="primary">⏸ 暂停</button>
+        <div style="height:8px"></div>
+        <div class="lbl">加速倍率 · 每帧 <span id="speedval" class="v">4</span> 步</div>
+        <input id="speed" type="range" min="0" max="8" value="2" />
+        <div style="height:8px"></div>
+        <button id="reset">⟲ 重置世界</button>
+      </div>
+
+      <div class="panel">
+        <div class="legend">
+          <span><span class="sw" style="background:#9b5de5"></span>草食动物</span>
+          <span><span class="sw" style="background:#e6d64b"></span>杂食动物</span>
+          <span><span class="sw" style="background:#e8443b"></span>肉食动物</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="lbl">种群</div>
+        <div class="row"><span class="k">存活数量</span><span class="v" id="pop">–</span></div>
+        <div class="row"><span class="k">肉食比例</span><span class="v" id="carn">–</span></div>
+        <div class="row"><span class="k">平均食性</span><span class="v" id="diet">–</span></div>
+        <div class="row"><span class="k">平均能量</span><span class="v" id="energy">–</span></div>
+        <div class="row"><span class="k">平均水分</span><span class="v" id="water">–</span></div>
+        <div class="row"><span class="k">平均年龄</span><span class="v" id="age">–</span></div>
+        <div class="row"><span class="k">植物总量</span><span class="v" id="plant">–</span></div>
+      </div>
+
+      <div class="panel" id="inspector">
+        <div class="lbl">个体检视器</div>
+        <div id="itype" class="muted">点击一个个体</div>
+        <div class="bar"><i id="ibar" style="left:0%"></i></div>
+        <div style="height:8px"></div>
+        <div class="row"><span class="k">编号</span><span class="v" id="i_id">–</span></div>
+        <div class="row"><span class="k">食性</span><span class="v" id="i_diet">–</span></div>
+        <div class="row"><span class="k">能量</span><span class="v" id="i_energy">–</span></div>
+        <div class="row"><span class="k">水分</span><span class="v" id="i_water">–</span></div>
+        <div class="row"><span class="k">年龄</span><span class="v" id="i_age">–</span></div>
+        <div class="row"><span class="k">世代</span><span class="v" id="i_gen">–</span></div>
+        <div class="row"><span class="k">速度</span><span class="v" id="i_speed">–</span></div>
+        <div class="row"><span class="k">植物摄入</span><span class="v" id="i_food">–</span></div>
+        <div class="row"><span class="k">肉类摄入</span><span class="v" id="i_meat">–</span></div>
+        <div class="row"><span class="k">受到伤害</span><span class="v" id="i_dmg">–</span></div>
+        <div class="row"><span class="k">饮水量</span><span class="v" id="i_drink">–</span></div>
+
+        <div style="height:10px"></div>
+        <div class="lbl">摇光 · 视网膜(它看到的)</div>
+        <canvas id="retina" width="150" height="150" style="display:block;margin:0 auto"></canvas>
+        <div class="legend" style="justify-content:center;margin-top:4px">
+          <span><span class="sw" style="background:#50dc5a"></span>食物</span>
+          <span><span class="sw" style="background:#50c8e6"></span>猎物</span>
+          <span><span class="sw" style="background:#eb4640"></span>威胁</span>
+          <span><span class="sw" style="background:#468ceb"></span>水源</span>
+        </div>
+        <div style="height:8px"></div>
+        <div class="lbl">神经元(记忆状态)</div>
+        <div id="neurons" style="display:flex;flex-wrap:wrap;gap:3px"></div>
+        <div style="height:8px"></div>
+        <div class="row"><span class="k">转向</span><span class="v" id="i_turn">–</span></div>
+        <div class="row"><span class="k">推进力</span><span class="v" id="i_thrust">–</span></div>
+      </div>
+
+      <div class="panel">
+        <div class="lbl">渲染</div>
+        <div class="row"><span class="k">帧率</span><span class="v" id="fps">–</span></div>
+        <div class="row"><span class="k">帧数</span><span class="v" id="frame">–</span></div>
+      </div>
+    </div>
+  </div>
+  <script src="render.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

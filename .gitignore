@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 日志与运行产物
+*.log
+outputs/
+checkpoints/
+runs/
+wandb/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store

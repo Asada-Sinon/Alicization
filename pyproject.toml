@@ -1,0 +1,26 @@
+[project]
+name = "underworld"
+version = "0.0.1"
+description = "GPU-native 2D artificial-life / fluctlight sandbox (SAO Alicization inspired)"
+requires-python = ">=3.10"
+dependencies = [
+    "jax[cuda12]>=0.4.34",
+    "numpy>=1.26",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "websockets>=12.0",
+    "pyyaml>=6.0",
+    "chex>=0.1.85",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+# We do not build/install this project as a wheel; run scripts from the repo
+# root so the `underworld/`, `server/` packages import directly.
+[tool.uv]
+package = false
