@@ -145,3 +145,31 @@ def test_alive_energy_consistency():
     # Culled/empty slots that were never (re)born stay at zero-ish; at minimum
     # they must not hold reproducible energy above the threshold.
     assert bool(jnp.all(state.energy[dead] <= cfg.repro_threshold))
+
+
+def test_metrics_water_bounded():
+    """The spatial-occupancy metrics must stay interpretable.
+
+    These are the readouts the river-camping work is measured against, so a
+    silently out-of-range value would invalidate the comparison rather than
+    fail loudly somewhere else.
+    """
+    cfg = tiny_cfg()
+    _state, ms = run(cfg, 200)
+    m = {k: np.asarray(v) for k, v in ms._asdict().items()}
+
+    for name in ("herb_water_dist", "carn_water_dist",
+                 "water_bound_frac", "inland_frac"):
+        assert np.all(np.isfinite(m[name])), f"non-finite in {name}"
+
+    for name in ("water_bound_frac", "inland_frac"):
+        assert np.all(m[name] >= 0.0) and np.all(m[name] <= 1.0), name
+
+    # A distance on the torus cannot exceed the half-diagonal.
+    limit = cfg.half_world * np.sqrt(2.0) + 1e-4
+    assert np.all(m["herb_water_dist"] <= limit)
+    assert np.all(m["carn_water_dist"] <= limit)
+
+    # The two fractions partition opposite ends of the same axis: an agent
+    # cannot be both inside the drinkable band and beyond the sensor's reach.
+    assert np.all(m["water_bound_frac"] + m["inland_frac"] <= 1.0 + 1e-4)

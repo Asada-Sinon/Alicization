@@ -26,6 +26,12 @@ class Metrics(NamedTuple):
     mean_water: jax.Array       # hydration level, separate resource from energy
     mean_elevation: jax.Array   # mean terrain height under the population
     forest_frac: jax.Array      # fraction of the population standing under canopy
+    # Spatial occupancy relative to water. Appended, never inserted --
+    # `scripts/run_headless.py` indexes this tuple positionally.
+    herb_water_dist: jax.Array  # mean distance-to-water under herbivores
+    carn_water_dist: jax.Array  # mean distance-to-water under carnivores
+    water_bound_frac: jax.Array # fraction standing in the drinkable band
+    inland_frac: jax.Array      # fraction beyond the water sensor's reach entirely
 
 
 def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
@@ -43,6 +49,13 @@ def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
     carn_n = jnp.maximum(jnp.sum(is_carn), 1.0)
     herb_n = jnp.maximum(jnp.sum(is_herb), 1.0)
 
+    # How far the population actually lives from water. The retina's water
+    # channel dies at `vision_radius` and each sector samples `food_sample_dist`
+    # ahead, so past their sum an agent has no directional water signal at all --
+    # that boundary is what `inland_frac` counts against.
+    wd = terrain.water_dist[cell]
+    sensor_reach = cfg.vision_radius + cfg.food_sample_dist
+
     return Metrics(
         population=pop,
         mean_energy=jnp.sum(state.energy * alive) / denom,
@@ -56,4 +69,8 @@ def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
         mean_water=jnp.sum(state.water * alive) / denom,
         mean_elevation=jnp.sum(terrain.height[cell] * alive) / denom,
         forest_frac=jnp.sum((terrain.forest[cell] > 0.5) * alive) / denom,
+        herb_water_dist=jnp.sum(wd * is_herb) / herb_n,
+        carn_water_dist=jnp.sum(wd * is_carn) / carn_n,
+        water_bound_frac=jnp.sum((wd < cfg.river_half_width) * alive) / denom,
+        inland_frac=jnp.sum((wd > sensor_reach) * alive) / denom,
     )
