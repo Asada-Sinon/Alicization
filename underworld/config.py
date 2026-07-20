@@ -42,7 +42,10 @@ class Config:
     #                                 gentle-crash regime.
 
     # --- brain (fixed-topology recurrent net; weights live in the genome) ---
-    # inputs: per retina sector [food, prey, predator] + [own_energy, own_diet].
+    # inputs: per retina sector [food, prey, predator, water, slope]
+    #       + [own_energy, own_diet, own_water]
+    #       + per memory slot [sin bearing, cos bearing, distance, confidence].
+    # See the `in_dim` property for the authoritative count.
     retina_sectors: int = 8        # directional vision resolution
     hidden: int = 16               # recurrent hidden units (the fluctlight's memory)
     out_dim: int = 2               # [turn, thrust]
@@ -231,6 +234,28 @@ class Config:
     #                                   product; with forest**2 on top this lands
     #                                   fruit on a small percentage of the map
 
+    # --- long-term spatial memory (see memory.py) ---
+    memory_water_slots: int = 2       # one slot is fragile: a single stale entry
+    #                                   blinds the agent. Two lets a lineage hold
+    #                                   a home river and an outbound waypoint
+    memory_fruit_slots: int = 2       # symmetric, for the patchy fruit layer
+    memory_dist_scale: float = 60.0   # tanh normaliser for remembered distance.
+    #                                   Median distance-to-water (35.5) lands
+    #                                   mid-range; the post-forage-water round
+    #                                   trip (~136) saturates it, which is where
+    #                                   the journey stops being survivable anyway
+    memory_decay: float = 0.998       # per step -> half-life 346 steps. A round
+    #                                   trip to median water is ~190 steps, so a
+    #                                   slot survives roughly two trips: long
+    #                                   enough to be worth having, short enough
+    #                                   that a stale one doesn't strand descendants
+    memory_drift: float = 0.25        # dead-reckoning noise as a fraction of each
+    #                                   step's displacement. Weaker than it looks:
+    #                                   random-walk error grows as sqrt(n), so a
+    #                                   200-step trip accumulates only ~3.7 units.
+    #                                   memory_decay does the forgetting; do not
+    #                                   crank this up to compensate
+
     # --- rng ---
     seed: int = 0
 
@@ -270,10 +295,15 @@ class Config:
         return self.forest_water_frac * self.world_size
 
     @property
+    def memory_slots(self) -> int:
+        return self.memory_water_slots + self.memory_fruit_slots
+
+    @property
     def in_dim(self) -> int:
         """Retina channels (food/prey/predator/water/slope per sector) + energy
-        + diet + own water."""
-        return 5 * self.retina_sectors + 3
+        + diet + own water + four numbers per memory slot (sin/cos of bearing,
+        squashed distance, confidence)."""
+        return 5 * self.retina_sectors + 3 + 4 * self.memory_slots
 
     @property
     def brain_params(self) -> int:

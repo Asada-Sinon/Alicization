@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 from underworld import Config, new_world
-from underworld import dynamics
+from underworld import dynamics, memory, reproduction
 from underworld import terrain as terrain_mod
 from underworld.state import init_state
 
@@ -45,6 +45,8 @@ def test_shapes():
     assert s.genome.shape == (cfg.n_max, cfg.genome_size)
     assert s.water.shape == (cfg.n_max,)
     assert s.plant.shape == (cfg.n_cells,)
+    assert s.fruit.shape == (cfg.n_cells,)
+    assert s.memory.shape == (cfg.n_max, cfg.memory_slots, 3)
     assert int(jnp.sum(s.alive)) == cfg.n_init
 
 
@@ -146,6 +148,85 @@ def test_alive_energy_consistency():
     # Culled/empty slots that were never (re)born stay at zero-ish; at minimum
     # they must not hold reproducible energy above the threshold.
     assert bool(jnp.all(state.energy[dead] <= cfg.repro_threshold))
+
+
+def test_memory_is_not_heritable():
+    """A newborn starts with an empty map, and the parent keeps its own.
+
+    Genes cross generations; memory does not. This guards both halves: a child
+    that woke up knowing where water is would be Lamarckian, and a parent whose
+    slots got clobbered by giving birth would lose a lifetime of learning to the
+    permutation-scatter writing over the wrong rows.
+    """
+    cfg = tiny_cfg(n_max=64, n_init=8)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+
+    # One rich parent with a known slot; nobody else can breed.
+    known = jnp.array([12.0, -5.0, 1.0])
+    memory = jnp.zeros_like(state.memory).at[0, 0].set(known)
+    energy = jnp.where(jnp.arange(cfg.n_max) == 0, cfg.repro_threshold + 5.0, 1.0)
+    state = state._replace(
+        alive=jnp.arange(cfg.n_max) < 4, memory=memory, energy=energy)
+
+    child = reproduction.reproduce(state, jax.random.PRNGKey(1), cfg)
+    born = np.asarray(child.alive & ~state.alive)
+    assert born.sum() == 1, "expected exactly one birth"
+    i = int(np.argmax(born))
+
+    assert np.all(np.asarray(child.memory[i]) == 0.0), (
+        f"newborn woke up with memory {np.asarray(child.memory[i, 0])} -- "
+        f"memory must be acquired, not inherited")
+    assert np.allclose(np.asarray(child.memory[0, 0]), np.asarray(known)), (
+        "the parent lost its own slots to the birth")
+
+
+def test_memory_write_replaces_exactly_one_slot():
+    """The weakest-slot write must touch one column and leave the rest alone."""
+    cfg = tiny_cfg()
+    n, k = 8, cfg.memory_slots
+    mem = jnp.tile(jnp.array([3.0, 4.0, 0.9]), (n, k, 1))
+    mem = mem.at[:, 1, 2].set(0.1)                     # slot 1 is the weakest
+    should = jnp.arange(n) < 3                         # only the first three write
+
+    out = memory.write(mem, 0, cfg.memory_water_slots, should, cfg)
+    changed = np.asarray(jnp.any(out != mem, axis=2))  # [n, k]
+
+    assert np.all(changed[:3].sum(axis=1) == 1), "writers must change one slot"
+    assert not changed[3:].any(), "non-writers must be untouched"
+    assert np.all(changed[:3, 1]), "the weakest slot should be the one replaced"
+    assert np.allclose(np.asarray(out[:3, 1]), [0.0, 0.0, 1.0])
+
+
+def test_memory_tracks_position():
+    """Walking away from a remembered point must grow the vector back to it.
+
+    With drift disabled this is exact dead reckoning, so it isolates the
+    bookkeeping from the noise model.
+    """
+    cfg = tiny_cfg(memory_drift=0.0)
+    n, k = 4, cfg.memory_slots
+    mem = jnp.zeros((n, k, 3)).at[:, 0, 2].set(1.0)    # standing on the memory
+    disp = jnp.tile(jnp.array([1.0, 0.0]), (n, 1))     # walk +x, one unit a step
+
+    key = jax.random.PRNGKey(0)
+    for _ in range(10):
+        mem = memory.advance(mem, disp, key, cfg)
+
+    # Ten steps east means the remembered point is now ten units west.
+    assert np.allclose(np.asarray(mem[:, 0, :2]), [[-10.0, 0.0]] * n, atol=1e-4)
+    assert float(mem[0, 0, 2]) == pytest.approx(cfg.memory_decay ** 10, rel=1e-5)
+
+
+def test_memory_vector_bounded():
+    """Slots stay shortest-path vectors on the torus, however long the run."""
+    cfg = tiny_cfg()
+    state, _ms = run(cfg, 400)
+    mem = np.asarray(state.memory)
+    assert np.all(np.isfinite(mem))
+    assert np.all(np.abs(mem[..., :2]) <= cfg.half_world + 1e-3)
+    assert mem[..., 2].min() >= 0.0 and mem[..., 2].max() <= 1.0 + 1e-6
 
 
 def test_fruit_field_bounded():

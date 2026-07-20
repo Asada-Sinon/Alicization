@@ -90,12 +90,16 @@ Python/venv noise, but scratch work belongs in the session scratchpad, not here.
 Per-step order matters and is easy to get wrong when editing:
 
 1. `spatial.build_table` → `gather_neighbors` → `geometry` (neighbour index)
-2. `sensors.sense` (retina) → `brain.forward` (recurrent) → `dynamics.act` (move)
-3. `dynamics.graze` + `drink`
-4. **neighbour index is rebuilt** — predation must see post-movement positions
-5. `dynamics.predation` → `metabolize` → `thirst`
-6. `reproduction.cull` (death) → `reproduce` (birth)
-7. `ecology.regrow`, and `diet` is re-cached from the genome
+2. `sensors.sense` (retina + memory) → `brain.forward` (recurrent) → `dynamics.act` (move)
+3. `memory.advance` — **after the move, before any write**, so a slot recorded
+   below reads as ~0 offset from where the agent actually stands
+4. `dynamics.graze` + `eat_fruit` + `drink`
+5. `memory.write` ×2 (water slots on `drink_gain > 0`, fruit on `fruit_gain > 0`)
+6. **neighbour index is rebuilt** — predation must see post-movement positions
+7. `dynamics.predation` → `metabolize` → `thirst`
+8. `reproduction.cull` (death) → `reproduce` (birth) — memory inheritance rides
+   through `place()`
+9. `ecology.regrow` ×2 (grass, fruit), and `diet` is re-cached from the genome
 
 ### Terrain is static, and derived from one elevation field
 
@@ -126,6 +130,29 @@ Also note the plant grid cell must stay comparable to `river_half_width`: water 
 sampled at cell centres, so a coarse grid on a large world can leave *no* cell
 registering as water, and everything dies of thirst.
 
+### Memory is two tiers, and the long one is inherited
+
+`memory.py` holds `[n_max, memory_slots, 3]` slots of `(dx, dy, strength)`. The
+short tier is the recurrent hidden state in `brain.py`; the long tier is these
+slots. **The vectors are relative to the holder, not absolute coordinates** — each
+step subtracts the displacement and re-wraps to shortest-path, so the torus is
+reasoned about once and inheritance becomes a subtraction. Never recompute a slot
+from absolute positions.
+
+Slots are **partitioned by position, not tagged**: `[0, memory_water_slots)` is
+water, the rest fruit. The brain reads a fixed meaning per input group, and each
+slot costs one input less. Writes use `argmin` → `one_hot` → `where` rather than
+`.at[].set()`, so nothing here is a dynamic index or an atomic — unlike the
+per-cell scatter-adds, this adds no nondeterminism. Strength 0 means "empty" and
+is the natural `argmin` target, so no validity mask is needed.
+
+Children **inherit** their parent's slots (discounted by `memory_inherit_frac`),
+unlike the hidden state which is zeroed. This is load-bearing, not flavour: it is
+what lets a lineage accumulate a map across generations, and it is why
+`inland_frac` keeps climbing over a 20k run instead of jumping once and flattening.
+`reproduction.place` needed no change for the rank-3 field — its `expand` is
+already generic.
+
 ### Everything is fixed-shape tensors
 
 `WorldState` (`state.py`) is a `NamedTuple` pytree of `[n_max, ...]` arrays. Life and
@@ -145,7 +172,8 @@ overflow beyond `k_neighbors` to a dump column. One index feeds both vision and 
 `Config` is a frozen dataclass treated as compile-time constant. Anything that changes an
 array *shape* (`n_max`, `grid`, `retina_sectors`, `hidden`, `trait_dim`) must live there,
 and changing it requires a fresh `new_world`. Several fields are **derived properties**,
-not stored: `in_dim = 4*retina_sectors + 3`, `brain_params`, `diet_index`, `genome_size`.
+not stored: `in_dim = 5*retina_sectors + 3 + 4*memory_slots`, `brain_params`,
+`diet_index`, `genome_size`, `memory_slots`.
 
 Consequence worth knowing before touching sensors or the brain: adding a retina channel
 or resizing `hidden` changes `genome_size`, which **invalidates the entire evolved
@@ -165,10 +193,18 @@ Three places must change together:
 - `HEADER_BYTES` in `web/main.js`
 - every `dv.getFloat32(offset)` in `main.js` `parse()` **after** the insertion point
 
-Currently v5: 64-byte header. New metrics can be added without touching `server/app.py` —
-`encode()` reads from a dict built by `metrics._asdict()`, so any field on `Metrics` is
-already available by name. Verify wire changes against a live server, not by reading;
-a bad offset produces plausible-looking wrong numbers, not an error.
+Currently v6: 68-byte header, then agents, then the `plant` and `fruit` u8 planes.
+New metrics can be added without touching `server/app.py` — `encode()` reads from a
+dict built by `metrics._asdict()`, so any field on `Metrics` is already available by
+name. Verify wire changes against a live server, not by reading; a bad offset
+produces plausible-looking wrong numbers, not an error.
+
+**Append, never insert.** v6 grew the header (`fruit_total` last, at offset 64) and
+added a second grid plane after `plant`, and *no existing client offset moved* —
+which is the only reason it was a four-line change. Putting either one further up
+would have silently shifted every read after it. Same discipline applies to
+`Metrics`: `scripts/run_headless.py` now reads it by name, but `protocol.encode`'s
+pack call is still positional.
 
 **Terrain travels in its own one-shot message** (`encode_terrain`, magic `UNTR`:
 12-byte header + three `grid²` u8 planes), sent on connect and after a reset, not

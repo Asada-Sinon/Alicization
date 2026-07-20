@@ -22,6 +22,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
+from . import memory
 from .config import Config
 from .state import WorldState, pos_to_cell
 
@@ -85,6 +86,10 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
 
     energy = jnp.tanh(state.energy / cfg.energy_scale)[:, None]
     own_water = jnp.tanh(state.water / cfg.water_scale)[:, None]
+    # Memory goes on the *end* of the vector: `server/app.py:_build_detail`
+    # slices the retina channels by leading offset, and appending keeps those
+    # slices valid.
+    mem = memory.encode(state.memory, state.heading, cfg)        # [n, 4*slots]
     return jnp.concatenate(
-        [food, prey, pred, water_ch, slope, energy, di, own_water], axis=1
-    )                                                            # [n, 5R+3]
+        [food, prey, pred, water_ch, slope, energy, di, own_water, mem], axis=1
+    )                                                    # [n, 5R+3+4*slots]

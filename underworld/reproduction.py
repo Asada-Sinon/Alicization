@@ -101,6 +101,14 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
     last_damage = place(state.last_damage, zeros)
     last_drink = place(state.last_drink, zeros)
     hidden = place(state.hidden, jnp.zeros((cfg.n_max, cfg.hidden)))
+    # Memory is NOT inherited -- newborns start with an empty map and have to
+    # learn the world themselves. Genes are the heritable channel; memory is
+    # acquired within a lifetime. An earlier version copied the parent's slots
+    # at birth, which is Lamarckian and was measured to do nothing anyway
+    # (n=6 paired: +0.020 mean inland_frac against a 0.031 SD of the difference,
+    # losing on 2 of 6 seeds). `place` handles the [n_max, slots, 3] rank without
+    # modification -- its `expand` is already generic.
+    memory = place(state.memory, jnp.zeros_like(state.memory))
     last_input = place(state.last_input, jnp.zeros((cfg.n_max, cfg.in_dim)))
     last_output = place(state.last_output, jnp.zeros((cfg.n_max, cfg.out_dim)))
 
@@ -109,5 +117,5 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
         heading=heading, hue=hue, age=age, vel=vel, generation=generation,
         last_food=last_food, last_meat=last_meat, last_damage=last_damage,
         last_drink=last_drink, hidden=hidden, last_input=last_input,
-        last_output=last_output,
+        last_output=last_output, memory=memory,
     )

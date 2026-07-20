@@ -10,7 +10,8 @@ import functools
 import jax
 import jax.numpy as jnp
 
-from . import brain, dynamics, ecology, metrics, reproduction, sensors, spatial
+from . import (brain, dynamics, ecology, memory, metrics, reproduction, sensors,
+               spatial)
 from . import terrain as terrain_mod
 from .config import Config
 from .state import WorldState, diet_of, init_state
@@ -34,6 +35,12 @@ def build_step(cfg: Config, terrain):
         state = state._replace(hidden=hidden, last_input=inputs, last_output=outputs)
         state, thrust, climb = dynamics.act(state, outputs, terrain, cfg)
 
+        # 3b. carry the memory vectors across the movement just made, so a slot
+        # written below records an offset of ~0 from where the agent now stands.
+        key, k_drift = jax.random.split(key)
+        state = state._replace(
+            memory=memory.advance(state.memory, state.vel * cfg.dt, k_drift, cfg))
+
         # 4. graze/drink, then hunt (neighbours re-indexed after moving), then metabolism
         energy, plant, food_gain, forage_water = dynamics.graze(state, cfg)
         state = state._replace(energy=energy, plant=plant)
@@ -43,6 +50,15 @@ def build_step(cfg: Config, terrain):
         # top a tank up but never overfill one past what a river would.
         water = jnp.minimum(water + forage_water + fruit_water, cfg.water_max)
         state = state._replace(energy=energy, water=water, fruit=fruit)
+
+        # 4b. remember where that came from. Writes are triggered by the eating
+        # itself, not by a brain decision -- the agent does not choose to
+        # memorise, it simply has been somewhere worth returning to.
+        mem = memory.write(state.memory, 0, cfg.memory_water_slots,
+                           drink_gain > 0.0, cfg)
+        mem = memory.write(mem, cfg.memory_water_slots, cfg.memory_slots,
+                           fruit_gain > 0.0, cfg)
+        state = state._replace(memory=mem)
         table2 = spatial.build_table(state, cfg)
         nbr2 = spatial.gather_neighbors(state, table2, cfg)
         _d2, dist2, valid2 = spatial.geometry(state, nbr2, cfg)

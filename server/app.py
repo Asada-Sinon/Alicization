@@ -103,7 +103,17 @@ class Simulation:
             "retina_prey": li[r:2 * r].round(3).tolist(),
             "retina_pred": li[2 * r:3 * r].round(3).tolist(),
             "retina_water": li[3 * r:4 * r].round(3).tolist(),
+            "retina_slope": li[4 * r:5 * r].round(3).tolist(),
             "hidden": hid.round(3).tolist(),
+            # Long-term memory: one row per slot, water slots first. Read off
+            # `state.memory` rather than the encoded inputs -- the inspector
+            # wants world units and a raw bearing, not the squashed values the
+            # brain sees.
+            "memory_water_slots": int(self.cfg.memory_water_slots),
+            "memory": [
+                [round(float(x), 2) for x in row]
+                for row in np.asarray(s.memory[i])
+            ],
             "turn": float(out[0]),
             "thrust": float(out[1]),
         })

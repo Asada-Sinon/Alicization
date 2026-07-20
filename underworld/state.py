@@ -37,6 +37,7 @@ class WorldState(NamedTuple):
     last_output: jax.Array # f32    [n_max, out_dim]    last brain output (inspector)
     plant: jax.Array       # f32    [n_cells]    plant energy field (flattened grid)
     fruit: jax.Array       # f32    [n_cells]    fruit field: patchy, canopy-only
+    memory: jax.Array      # f32 [n_max, slots, 3]  (dx, dy, strength) -- see memory.py
 
 
 def diet_of(genome: jax.Array, cfg: Config) -> jax.Array:
@@ -104,6 +105,10 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         last_output=jnp.zeros((n, cfg.out_dim)),
         plant=plant,
         fruit=fruit,
+        # Founders know nothing. Strength 0 reads as "empty slot" and is the
+        # natural argmin target, so the first drink each agent takes fills a slot
+        # rather than overwriting one.
+        memory=jnp.zeros((n, cfg.memory_slots, 3)),
     )
 
 
