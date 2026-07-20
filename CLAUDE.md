@@ -152,10 +152,21 @@ per-cell scatter-adds, this adds no nondeterminism. Strength 0 means "empty" and
 is the natural `argmin` target, so no validity mask is needed.
 
 Newborns get **empty** slots. Genes cross generations; memory is acquired within a
-lifetime and dies with its holder — copying a parent's slots at birth is Lamarckian,
-and it was also measured to do nothing (n=6 paired, mean `inland_frac` +0.020
-against a paired SD of 0.031). Removed in `cbe434d`; don't reintroduce it. The
-legitimate route to cross-generational knowledge is social learning — juveniles
+lifetime and dies with its holder — copying a parent's slots at birth is Lamarckian.
+Removed in `cbe434d`; don't reintroduce it.
+
+An earlier version of this paragraph said the copy "was also measured to do
+nothing." **That was an overclaim and is worth keeping as a cautionary note.** The
+data (n=6 paired, mean `inland_frac` +0.020, paired SD 0.031) gives p=0.175 with a
+95% interval of [−0.013, +0.053] and **25% power** — a null was the most likely
+outcome even if the true effect were exactly the +0.020 observed. What the data
+does support, by equivalence test, is the narrower claim that any effect is
+**smaller than 0.05** (TOST p=0.032). Removing the mechanism was still right,
+because the Lamarckian argument stands on its own and the burden was on the
+mechanism — but "underpowered, bounded below 0.05" is the honest description, not
+"does nothing."
+
+The legitimate route to cross-generational knowledge is social learning — juveniles
 following adults and drinking for themselves, which `memory.write` already
 supports since it only asks whether you are at water, not how you got there.
 `reproduction.place` needs no change for the rank-3 field either way — its
@@ -245,8 +256,38 @@ steps. Don't retune casually; validate with a long `run_headless.py` run and wat
 stochastic process, and run-to-run variance is larger than most parameter effects.
 A config that looked clearly best on one seed scored 0% carnivores on all four
 seeds tested, while one that looked clearly worst averaged 2%+ — the entire
-first-pass conclusion was noise. Compare candidate configs across ≥3 seeds and
-look at the mean before believing any difference.
+first-pass conclusion was noise.
+
+**Six seeds paired, or five per arm unpaired — three is below the floor.** This
+supersedes an earlier "≥3 seeds" rule here, which was arithmetically incapable of
+producing a result: the *smallest attainable* two-sided p is 0.10 for a 3-vs-3
+Mann-Whitney and 0.25 for a 3-pair signed-rank test, whatever the data. n=4 per
+arm unpaired and n=6 paired are the first sample sizes where the test can reach
+0.05 at all. Measured between-seed SD here is `inland_frac` ±0.027 and
+`carnivore_frac` ±0.012, so detecting a 0.02 shift in `inland_frac` at 80% power
+needs ~21 paired seeds — budget accordingly, or state plainly that the run was
+underpowered.
+
+Report the per-seed numbers, not just the mean; `--json` already emits them.
+Prefer Mann-Whitney (or paired Wilcoxon) with an effect size and a bootstrap
+interval over a bare mean, and do not Bonferroni-correct — report every p-value
+you computed instead.
+
+**Seeds vary the founders, not the world.** `terrain.build(cfg)` uses no RNG at
+all, so every seed runs on the *same map*. Any spatial claim (`inland_frac`,
+`water_bound_frac`, the distance metrics) therefore generalises to *this river
+system*, not to rivers in general — that is pseudoreplication, and the honest fix
+is to vary `ridge_wavenumber` / `ridge_amplitude` / `ridge_base_y` and the river
+sources across a terrain seed, then treat terrain and founders as crossed factors.
+Note a rigid translation is not enough: the world is a torus, so shifting the map
+changes nothing.
+
+**Spatial metrics need a null before they mean anything.** `inland_frac = 0.30` is
+not "low" until you know what random placement gives. Computed from the terrain
+alone: uniform over all cells → 0.556, over habitable cells → 0.675,
+capacity-weighted → 0.650. So the population sits ~0.35 *below* chance, which is
+the actual finding; and an effect of +0.020 is 5.8% of that gap, which is the
+honest way to size it.
 
 **`n_init` has a sweet spot that is narrow in both directions.** Seed near the
 equilibrium and the carnivore founder pool is too small to survive its own
