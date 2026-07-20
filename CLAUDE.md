@@ -39,9 +39,15 @@ Remote is `origin` → `git@github-asada:Asada-Sinon/Alicization.git`, branch `m
 `~/.ssh/config`, not a real hostname — don't "correct" it to `github.com`, and if a
 push fails with a host-resolution error the alias is missing, not the URL.
 
-Commit as you finish each coherent piece of work rather than letting changes pile up;
-push to `origin main` once the relevant checks below pass. Prefer several small
-commits over one large one.
+Commit as you finish each coherent piece of work rather than letting changes pile up.
+**Once the checks below pass, push to `origin main` without asking** — the push is
+part of finishing the work, not a separate decision needing sign-off.
+
+**Split by reason for change, not by feature.** A useful test: if the commit message
+needs the words "also" or "while I was there", it should have been two commits. One
+past commit bundled a new resource layer, a wire-protocol bump, and a shader change
+across 14 files — that should have been three, because a later reader looking for
+"when did the protocol change" has to read a message about fruit ecology to find it.
 
 **Commit messages are written in Chinese** — both the subject line and the body.
 This is the project's convention; follow it even when the conversation is in
