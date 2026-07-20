@@ -130,14 +130,13 @@ Also note the plant grid cell must stay comparable to `river_half_width`: water 
 sampled at cell centres, so a coarse grid on a large world can leave *no* cell
 registering as water, and everything dies of thirst.
 
-### Memory is two tiers, and the long one is inherited
+### Memory is two tiers, and neither is inherited
 
 `memory.py` holds `[n_max, memory_slots, 3]` slots of `(dx, dy, strength)`. The
 short tier is the recurrent hidden state in `brain.py`; the long tier is these
 slots. **The vectors are relative to the holder, not absolute coordinates** — each
 step subtracts the displacement and re-wraps to shortest-path, so the torus is
-reasoned about once and inheritance becomes a subtraction. Never recompute a slot
-from absolute positions.
+reasoned about once. Never recompute a slot from absolute positions.
 
 Slots are **partitioned by position, not tagged**: `[0, memory_water_slots)` is
 water, the rest fruit. The brain reads a fixed meaning per input group, and each
@@ -146,12 +145,19 @@ slot costs one input less. Writes use `argmin` → `one_hot` → `where` rather 
 per-cell scatter-adds, this adds no nondeterminism. Strength 0 means "empty" and
 is the natural `argmin` target, so no validity mask is needed.
 
-Children **inherit** their parent's slots (discounted by `memory_inherit_frac`),
-unlike the hidden state which is zeroed. This is load-bearing, not flavour: it is
-what lets a lineage accumulate a map across generations, and it is why
-`inland_frac` keeps climbing over a 20k run instead of jumping once and flattening.
-`reproduction.place` needed no change for the rank-3 field — its `expand` is
-already generic.
+Newborns get **empty** slots. Genes cross generations; memory is acquired within a
+lifetime and dies with its holder — copying a parent's slots at birth is Lamarckian,
+and it was also measured to do nothing (n=6 paired, mean `inland_frac` +0.020
+against a paired SD of 0.031). Removed in `cbe434d`; don't reintroduce it. The
+legitimate route to cross-generational knowledge is social learning — juveniles
+following adults and drinking for themselves, which `memory.write` already
+supports since it only asks whether you are at water, not how you got there.
+`reproduction.place` needs no change for the rank-3 field either way — its
+`expand` is already generic.
+
+That empty start is a real handicap: measured hazard is **17.7× higher** in the
+first 50 steps of life than in old age, and 63% of all deaths happen there. See
+`docs/biology.md` §6.
 
 ### Everything is fixed-shape tensors
 
