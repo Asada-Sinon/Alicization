@@ -45,6 +45,21 @@ def diet_of(genome: jax.Array, cfg: Config) -> jax.Array:
     return jax.nn.sigmoid(genome[:, cfg.diet_index])
 
 
+def invest_of(genome: jax.Array, cfg: Config) -> jax.Array:
+    """Fraction of a parent's energy and water handed to one offspring.
+
+    The quantity/quality dial: a low value buys many cheap offspring, a high one
+    buys few well-provisioned ones. It needs no cost term because it is pure
+    allocation -- there is no "more is better" direction to run away in, which is
+    what makes it the safest possible first evolvable trait.
+
+    Not cached on `WorldState` like `diet` is: it is read once per birth and once
+    per metrics pass, both of which already hold the genome, so caching it would
+    add an [n_max] array to the scan carry for nothing.
+    """
+    return cfg.invest_min + cfg.invest_span * jax.nn.sigmoid(genome[:, cfg.invest_index])
+
+
 def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
     k_pos, k_head, k_gen, k_hue, k_plant, k_carn, k_rej = jax.random.split(key, 7)
     n = cfg.n_max

@@ -15,20 +15,38 @@ from .config import Config
 
 def mutate(genome: jax.Array, key: jax.Array, cfg: Config) -> jax.Array:
     """Add gaussian noise to a batch of genomes: [N, G] -> [N, G]. Brain genes
-    mutate at `mutation_sigma`; the diet gene mutates far slower so herbivore and
-    carnivore lineages stay distinct rather than blurring together.
+    mutate at `mutation_sigma`; trait genes mutate slower.
+
+    The asymmetry does two jobs at once. It keeps herbivore and carnivore
+    lineages distinct rather than blurring toward omnivore, which is what it was
+    originally tuned for. And it means the body drifts slower than the brain can
+    track it -- a controller is rarely far from the body it is controlling, which
+    is the standing problem with co-evolving morphology and control.
     """
     sigma = jnp.full((cfg.genome_size,), cfg.mutation_sigma)
     sigma = sigma.at[cfg.diet_index].set(cfg.diet_mutation_sigma)
+    sigma = sigma.at[cfg.invest_index].set(cfg.invest_mutation_sigma)
     return genome + jax.random.normal(key, genome.shape) * sigma
 
 
 def crossover(genome_a: jax.Array, genome_b: jax.Array, key: jax.Array,
               cfg: Config) -> jax.Array:
-    """Uniform crossover: each brain gene independently comes from parent A or B.
-    The diet gene always comes from parent A untouched, so mixing two parents'
-    brains never blends their heritable diet type (which would blur the
-    herbivore/carnivore split back toward the omnivore middle).
+    """Uniform crossover: each gene independently comes from parent A or B.
+
+    **Only the diet gene is exempt**, always taken from parent A, so mixing two
+    parents' brains never blends their heritable diet type back toward the
+    omnivore middle.
+
+    The investment gene deliberately does *not* get that protection, and the
+    reasoning is worth recording because the opposite is tempting. Exempting a
+    gene makes it non-recombining, so it stays linked to every other exempt gene
+    and correlations between them can accumulate by hitchhiking rather than by
+    selection -- which would corrupt `invest_diet_corr`, the very metric that
+    exists to detect whether carnivores really do provision differently. The two
+    reasons to exempt a gene are that it defines a discrete type worth keeping
+    distinct (diet) or that the brain is adapted to it and an intermediate value
+    would mismatch (a future body-size or speed gene). Investment is neither: it
+    is read once at birth and never enters the sensorimotor loop at all.
     """
     take_b = jax.random.bernoulli(key, 0.5, genome_a.shape)
     take_b = take_b.at[:, cfg.diet_index].set(False)

@@ -49,7 +49,7 @@ class Config:
     retina_sectors: int = 8        # directional vision resolution
     hidden: int = 16               # recurrent hidden units (the fluctlight's memory)
     out_dim: int = 2               # [turn, thrust]
-    trait_dim: int = 1             # non-brain genes; [0] = diet
+    trait_dim: int = 2             # non-brain genes; [0] = diet, [1] = investment
     genome_init_scale: float = 0.4
     food_sample_dist: float = 9.0  # how far ahead each sector samples the plant field
 
@@ -171,7 +171,15 @@ class Config:
     # --- life cycle ---
     energy_init: float = 8.0
     repro_threshold: float = 16.0  # reproduce above this energy
-    repro_cost_frac: float = 0.5   # fraction of energy handed to the child
+    # Per-offspring investment is a *gene*, not a constant -- see `invest_of`.
+    # These bound it; the range is Polyworld's, which evolved bodies in a
+    # comparable 2D world for years without it degenerating to an extreme.
+    invest_min: float = 0.2        # floor on the energy/water fraction given away
+    invest_span: float = 0.6       # so the gene maps onto [0.2, 0.8]
+    #                                A gene of 0 sigmoids to 0.5 -- the old fixed
+    #                                `repro_cost_frac` -- so a fresh population
+    #                                starts at the previous behaviour and drifts
+    #                                from there, which keeps the baseline clean.
     max_age: float = 3000.0        # steps before old age
     spawn_radius: float = 3.0      # child placed within this radius of parent
 
@@ -179,6 +187,13 @@ class Config:
     mutation_sigma: float = 0.05      # gaussian noise on brain genes per birth
     diet_mutation_sigma: float = 0.015  # diet is strongly heritable (keeps types
     #                                     distinct instead of blurring to omnivore)
+    invest_mutation_sigma: float = 0.02  # 0.4x the brain rate. Trait genes are
+    #                                      deliberately slower than brain genes:
+    #                                      a body the brain cannot track is worse
+    #                                      than a body that changes slowly, and
+    #                                      the same 0.3x ratio on `diet` is what
+    #                                      keeps the herbivore/carnivore split
+    #                                      from blurring.
     hue_drift: float = 0.02           # lineage colour drift per birth
     carnivore_init_frac: float = 0.05  # fraction of founders seeded as carnivores
 
@@ -315,6 +330,16 @@ class Config:
     def diet_index(self) -> int:
         """Column in the genome holding the diet gene."""
         return self.brain_params
+
+    @property
+    def invest_index(self) -> int:
+        """Column holding the per-offspring investment gene.
+
+        Trait genes are appended *after* the brain block, so adding one leaves
+        every brain weight at the same offset and only grows `genome_size` by
+        one. That is why a new trait is cheap where a new sensory input is not.
+        """
+        return self.brain_params + 1
 
     @property
     def genome_size(self) -> int:

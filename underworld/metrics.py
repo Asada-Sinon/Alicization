@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import WorldState, pos_to_cell
+from .state import WorldState, invest_of, pos_to_cell
 
 
 class Metrics(NamedTuple):
@@ -33,6 +33,13 @@ class Metrics(NamedTuple):
     water_bound_frac: jax.Array # fraction standing in the drinkable band
     inland_frac: jax.Array      # fraction beyond the water sensor's reach entirely
     fruit_total: jax.Array      # standing fruit crop, the canopy's high-value layer
+    # Per-offspring investment, the quantity/quality dial. The spread and the
+    # diet correlation matter more than the mean: a population splitting into
+    # cheap-and-many versus few-and-provisioned shows up as spread, and a mean
+    # sitting still can hide it entirely.
+    mean_invest: jax.Array      # mean evolved fraction of energy given per birth
+    invest_std: jax.Array       # spread (high => the population is not of one mind)
+    invest_diet_corr: jax.Array # do carnivores provision differently from grazers?
 
 
 def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
@@ -57,6 +64,17 @@ def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
     wd = terrain.water_dist[cell]
     sensor_reach = cfg.vision_radius + cfg.food_sample_dist
 
+    # Investment gene, over the living only. The correlation is computed the
+    # long way rather than with jnp.corrcoef because that would weight the dead
+    # slots equally; `denom` is already the living count.
+    invest = invest_of(state.genome, cfg)
+    mean_invest = jnp.sum(invest * alive) / denom
+    d_inv = (invest - mean_invest) * alive
+    d_diet = (state.diet - mean_diet) * alive
+    invest_var = jnp.sum(d_inv * d_inv) / denom
+    cov = jnp.sum(d_inv * d_diet) / denom
+    corr = cov / jnp.maximum(jnp.sqrt(invest_var * diet_var), 1e-8)
+
     return Metrics(
         population=pop,
         mean_energy=jnp.sum(state.energy * alive) / denom,
@@ -75,4 +93,7 @@ def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
         water_bound_frac=jnp.sum((wd < cfg.river_half_width) * alive) / denom,
         inland_frac=jnp.sum((wd > sensor_reach) * alive) / denom,
         fruit_total=jnp.sum(state.fruit),
+        mean_invest=mean_invest,
+        invest_std=jnp.sqrt(invest_var),
+        invest_diet_corr=corr,
     )

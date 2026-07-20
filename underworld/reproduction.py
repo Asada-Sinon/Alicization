@@ -15,7 +15,7 @@ import jax.numpy as jnp
 
 from .config import Config
 from .genome import crossover, mutate
-from .state import WorldState
+from .state import WorldState, invest_of
 
 
 def cull(state: WorldState, cfg: Config) -> WorldState:
@@ -63,8 +63,11 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
     mate_idx = _assortative_mate(want, state.diet, cfg)[parent_idx]
     crossed = crossover(state.genome[parent_idx], state.genome[mate_idx], k_cross, cfg)
     child_genome = mutate(crossed, k_gen, cfg)
-    invest = state.energy[parent_idx] * cfg.repro_cost_frac
-    water_invest = state.water[parent_idx] * cfg.repro_cost_frac
+    # How much to hand over is the parent's own gene, not a global constant.
+    # Energy and water use the same fraction: provisioning is provisioning.
+    invest_frac = invest_of(state.genome, cfg)[parent_idx]
+    invest = state.energy[parent_idx] * invest_frac
+    water_invest = state.water[parent_idx] * invest_frac
     offset = jax.random.uniform(
         k_pos, (cfg.n_max, 2), minval=-cfg.spawn_radius, maxval=cfg.spawn_radius
     )

@@ -15,8 +15,9 @@ import pytest
 
 from underworld import Config, new_world
 from underworld import dynamics, memory, reproduction
+from underworld import genome as genome_mod
 from underworld import terrain as terrain_mod
-from underworld.state import init_state
+from underworld.state import init_state, invest_of
 
 
 # Small, fast config for tests.
@@ -148,6 +149,67 @@ def test_alive_energy_consistency():
     # Culled/empty slots that were never (re)born stay at zero-ish; at minimum
     # they must not hold reproducible energy above the threshold.
     assert bool(jnp.all(state.energy[dead] <= cfg.repro_threshold))
+
+
+def test_investment_gene_controls_the_handover():
+    """The energy a child receives must follow its parent's gene, not a constant.
+
+    Two parents identical but for the investment gene must hand over different
+    amounts. Without this the gene is inert and every downstream measurement of
+    "evolved investment" would be measuring drift in a gene nothing reads.
+    """
+    cfg = tiny_cfg(n_max=64, n_init=8)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+
+    # Two breeders, same energy, opposite investment genes; nobody else alive.
+    genome = state.genome.at[0, cfg.invest_index].set(-4.0)   # ~invest_min
+    genome = genome.at[1, cfg.invest_index].set(4.0)          # ~invest_min+span
+    energy = jnp.where(jnp.arange(cfg.n_max) < 2, cfg.repro_threshold + 5.0, 0.5)
+    state = state._replace(
+        alive=jnp.arange(cfg.n_max) < 2, genome=genome, energy=energy)
+
+    frac = np.asarray(invest_of(state.genome, cfg))
+    assert frac[0] == pytest.approx(cfg.invest_min, abs=0.02)
+    assert frac[1] == pytest.approx(cfg.invest_min + cfg.invest_span, abs=0.02)
+
+    child = reproduction.reproduce(state, jax.random.PRNGKey(1), cfg)
+    born = np.asarray(child.alive & ~state.alive)
+    assert born.sum() == 2, "expected both parents to breed"
+
+    # Each child's energy should be its own parent's energy times that parent's
+    # fraction. Match children to parents by which fraction the amount implies.
+    parent_energy = float(cfg.repro_threshold + 5.0)
+    got = sorted(float(child.energy[i]) for i in np.flatnonzero(born))
+    assert got[0] == pytest.approx(parent_energy * frac[0], rel=0.02)
+    assert got[1] == pytest.approx(parent_energy * frac[1], rel=0.02)
+
+
+def test_investment_gene_is_bounded_and_heritable():
+    """The gene stays inside [invest_min, invest_min+span] however extreme the
+    underlying value, and crossover never blends it between parents."""
+    cfg = tiny_cfg()
+    wild = jnp.linspace(-50.0, 50.0, cfg.n_max)
+    genome = jnp.zeros((cfg.n_max, cfg.genome_size)).at[:, cfg.invest_index].set(wild)
+    frac = np.asarray(invest_of(genome, cfg))
+    assert frac.min() >= cfg.invest_min - 1e-6
+    assert frac.max() <= cfg.invest_min + cfg.invest_span + 1e-6
+
+    # Diet is exempt from crossover; investment deliberately is NOT. Exempting a
+    # gene makes it non-recombining and therefore permanently linked to every
+    # other exempt gene, which would let `invest_diet_corr` climb by hitchhiking
+    # instead of by selection -- corrupting the one metric that exists to detect
+    # whether carnivores genuinely provision differently.
+    a = jnp.zeros((cfg.n_max, cfg.genome_size)).at[:, cfg.invest_index].set(-3.0)
+    b = jnp.ones((cfg.n_max, cfg.genome_size)).at[:, cfg.invest_index].set(3.0)
+    mixed = np.asarray(genome_mod.crossover(a, b, jax.random.PRNGKey(0), cfg))
+    assert np.all(mixed[:, cfg.diet_index] == 0.0), "diet must come from parent A"
+    inv = mixed[:, cfg.invest_index]
+    assert set(np.unique(inv)) == {-3.0, 3.0}, "investment must recombine"
+    assert 0.2 < float((inv == 3.0).mean()) < 0.8, "recombination looks biased"
+    # ...and brain genes mix too, or crossover is doing nothing at all.
+    assert 0.0 < float(np.mean(mixed[:, :cfg.brain_params])) < 1.0
 
 
 def test_memory_is_not_heritable():
