@@ -63,8 +63,9 @@ class Simulation:
         self.snapshot = protocol.encode(
             self.frame,
             np.asarray(s.alive), np.asarray(s.pos), np.asarray(s.diet),
-            np.asarray(s.energy), np.asarray(s.plant),
-            self.cfg.grid, self.cfg.world_size, self.cfg.plant_max, self.metrics,
+            np.asarray(s.energy), np.asarray(s.plant), np.asarray(s.fruit),
+            self.cfg.grid, self.cfg.world_size, self.cfg.plant_max,
+            self.cfg.fruit_max, self.metrics,
         )
         self.detail = self._build_detail() if self.selected is not None else None
 

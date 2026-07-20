@@ -201,6 +201,36 @@ class Config:
     #                                the sustainable population & prevents
     #                                total-starvation extinction
 
+    # --- fruit: the forest's high-value, patchy resource ---
+    # Forests hold far more total biomass than grassland but far *less* that a
+    # grazer can eat -- woody, tough, defended, with the canopy shading out the
+    # herb layer. That is why savanna carries the large-herbivore biomass and
+    # rainforest does not. What forest does offer is fruit: concentrated,
+    # accessible, and patchy. So canopy is not simply "more food" here; it is a
+    # low grazing floor with a high-value exception scattered through it.
+    fruit_max: float = 4.0            # capacity per cell, ~1.8x plant_max: worth a
+    #                                   detour and worth remembering, without
+    #                                   displacing the plant field as the floor
+    #                                   that sets sustainable population
+    fruit_energy: float = 2.0         # energy per unit fruit -- a full fruit cell
+    #                                   is worth ~3.6x a full grass cell
+    fruit_eat_rate: float = 1.0       # below eat_rate=1.5: a patch takes a while to
+    #                                   strip, so it supports a visit, not one bite
+    fruit_regrow_rate: float = 0.008  # ~7x slower than regrow_rate. The slowness is
+    #                                   the point: a patch that refilled quickly
+    #                                   would give memory no edge over just
+    #                                   searching, and remembering it is what this
+    #                                   resource exists to reward
+    fruit_regrow_baseline: float = 0.001  # small but nonzero -- at exactly zero a
+    #                                   stripped cell is a logistic fixed point and
+    #                                   stays dead forever
+    fruit_wavenumber_x: int = 7       # coprime with _y so the patch lattice never
+    fruit_wavenumber_y: int = 11      #   repeats within the torus; long beat period
+    #                                   keeps the patches looking irregular
+    fruit_patch_threshold: float = 0.55  # keeps roughly the top ~20% of the sine
+    #                                   product; with forest**2 on top this lands
+    #                                   fruit on a small percentage of the map
+
     # --- rng ---
     seed: int = 0
 

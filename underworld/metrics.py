@@ -32,6 +32,7 @@ class Metrics(NamedTuple):
     carn_water_dist: jax.Array  # mean distance-to-water under carnivores
     water_bound_frac: jax.Array # fraction standing in the drinkable band
     inland_frac: jax.Array      # fraction beyond the water sensor's reach entirely
+    fruit_total: jax.Array      # standing fruit crop, the canopy's high-value layer
 
 
 def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
@@ -73,4 +74,5 @@ def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
         carn_water_dist=jnp.sum(wd * is_carn) / carn_n,
         water_bound_frac=jnp.sum((wd < cfg.river_half_width) * alive) / denom,
         inland_frac=jnp.sum((wd > sensor_reach) * alive) / denom,
+        fruit_total=jnp.sum(state.fruit),
     )

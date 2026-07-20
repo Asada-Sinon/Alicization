@@ -48,7 +48,8 @@
       vec3 t = texture2D(u_terrain, v_uv).rgb;
       float h = t.r, forest = t.g, water = t.b;
 
-      float l = texture2D(u_plant, v_uv).r;
+      vec2 food = texture2D(u_plant, v_uv).ra;
+      float l = food.r, fr = food.g;
       // Most vegetated ground sits AT its carrying capacity, so the ceiling sets
       // the mood, not the curve -- a bright peak paints one flat lawn and drowns
       // the agents. Keep the peak a deep night forest.
@@ -59,6 +60,12 @@
       // canopy reads darker and colder than open grass, so the forest belt is
       // legible as terrain rather than just "more food"
       col = mix(col, vec3(0.014, 0.112, 0.072), forest * 0.7);
+
+      // Fruit: a warm amber against all that green, because it is the one food
+      // worth crossing the map for and has to be findable by eye. Kept as an
+      // additive bloom rather than a mix so a stripped patch fades out instead
+      // of punching a hole in the canopy colour.
+      col += vec3(0.42, 0.20, 0.03) * pow(fr, 1.3);
 
       // Bare rock takes over as the ground climbs. Deliberately a dark slate:
       // a light rock colour plus the relief highlight below turns every peak
@@ -196,8 +203,19 @@
       gl.useProgram(this.plantProg);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, snap.grid, snap.grid, 0,
-        gl.LUMINANCE, gl.UNSIGNED_BYTE, snap.plant);
+      // Grass and fruit share one LUMINANCE_ALPHA texture -- grass in .r, fruit
+      // in .a -- so the two food layers cost one upload and one sample instead
+      // of two of each.
+      const cells = snap.grid * snap.grid;
+      if (!this.foodBuf || this.foodBuf.length !== cells * 2) {
+        this.foodBuf = new Uint8Array(cells * 2);
+      }
+      for (let i = 0; i < cells; i++) {
+        this.foodBuf[i * 2] = snap.plant[i];
+        this.foodBuf[i * 2 + 1] = snap.fruit[i];
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE_ALPHA, snap.grid, snap.grid, 0,
+        gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, this.foodBuf);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, this.terrainTex);
       gl.uniform1i(gl.getUniformLocation(this.plantProg, "u_plant"), 0);

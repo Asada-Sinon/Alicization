@@ -5,7 +5,7 @@
 
   const SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
   const STRIDE = 5;              // floats per agent: x, y, diet, energy, id
-  const HEADER_BYTES = 64;       // protocol v5
+  const HEADER_BYTES = 68;       // protocol v6
   const PICK_RADIUS = 6.0;       // world units
   const HIST = 600;              // samples kept per series (~20s at 30fps)
 
@@ -101,11 +101,14 @@
     const herbSpeed = dv.getFloat32(52, true);
     const meanElev = dv.getFloat32(56, true);
     const forestFrac = dv.getFloat32(60, true);
+    const fruitTotal = dv.getFloat32(64, true);
     const agents = new Float32Array(buffer, HEADER_BYTES, n * STRIDE);
-    const plant = new Uint8Array(buffer, HEADER_BYTES + n * STRIDE * 4, grid * grid);
-    return { frame, n, grid, world, agents, plant, meanEnergy, plantTotal,
+    const planes = HEADER_BYTES + n * STRIDE * 4;
+    const plant = new Uint8Array(buffer, planes, grid * grid);
+    const fruit = new Uint8Array(buffer, planes + grid * grid, grid * grid);
+    return { frame, n, grid, world, agents, plant, fruit, meanEnergy, plantTotal,
       meanAge, meanDiet, carnFrac, meanWater, dietStd, carnSpeed, herbSpeed,
-      meanElev, forestFrac };
+      meanElev, forestFrac, fruitTotal };
   }
 
   // Static terrain, sent once per world: 12-byte header then three u8 planes.

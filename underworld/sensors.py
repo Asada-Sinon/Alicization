@@ -67,7 +67,13 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     offset = jnp.stack([jnp.cos(ang), jnp.sin(ang)], axis=2) * cfg.food_sample_dist
     sample = jnp.mod(state.pos[:, None, :] + offset, cfg.world_size)       # [n, R, 2]
     cells = pos_to_cell(sample.reshape(-1, 2), cfg).reshape(n, R)
-    food = state.plant[cells] / cfg.plant_max                  # [n, R]
+    # Fruit rides the existing food channel weighted by what it is actually
+    # worth to eat, rather than claiming a sixth retina channel. Both are food;
+    # what an agent needs to see is edible energy ahead. Keeping them in one
+    # channel also leaves `in_dim` -- and therefore every evolved genome --
+    # untouched by this layer.
+    edible = state.plant[cells] + cfg.fruit_energy * state.fruit[cells]
+    food = edible / cfg.plant_max                              # [n, R]
 
     wd = terrain.water_dist[cells]                             # [n, R]
     water_ch = jnp.clip(1.0 - wd / cfg.vision_radius, 0.0, 1.0)

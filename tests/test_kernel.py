@@ -148,6 +148,20 @@ def test_alive_energy_consistency():
     assert bool(jnp.all(state.energy[dead] <= cfg.repro_threshold))
 
 
+def test_fruit_field_bounded():
+    """Fruit stays inside its own capacity, which is a different field from the
+    plant capacity -- a copy-paste of the grass clamp would pass everywhere
+    except the cells that matter."""
+    cfg = tiny_cfg()
+    state, _ms = run(cfg, 300)
+    _s, _k, _sf, _sc, terrain = new_world(cfg)
+    fcap = np.asarray(terrain.fruit_capacity)
+    fruit = np.asarray(state.fruit)
+    assert np.all(np.isfinite(fruit))
+    assert fruit.min() >= 0.0
+    assert np.all(fruit <= fcap + 1e-4)
+
+
 def test_forage_water_cannot_replace_drinking():
     """At equilibrium plant density, grazing subsidises thirst but never covers
     it -- water stays a spatial constraint, not a rate one.

@@ -40,6 +40,9 @@ def test_derived_fields_in_range(built):
     cap = np.asarray(tr.capacity)
     assert cap.min() >= 0.0 and cap.max() <= cfg.plant_max + 1e-4
     assert np.asarray(tr.water_dist).min() >= 0.0
+    fcap = np.asarray(tr.fruit_capacity)
+    assert np.all(np.isfinite(fcap))
+    assert fcap.min() >= 0.0 and fcap.max() <= cfg.fruit_max + 1e-4
 
 
 def test_rivers_never_flow_uphill(built):
@@ -83,6 +86,39 @@ def test_nothing_grows_on_rock_or_open_water(built):
     peaks = np.asarray(tr.rock) > 0.99
     assert peaks.any(), "no bare rock anywhere -- the range is not tall enough"
     assert np.all(cap[peaks] < cfg.base_cost)
+    fcap = np.asarray(tr.fruit_capacity)
+    assert np.all(fcap[h < cfg.sea_level] == 0.0)
+    # Rock tapers by smoothstep like the grass capacity above, so the peaks hold
+    # a residue rather than an exact zero. Same economic bar: worth less than one
+    # step of existing.
+    assert np.all(fcap[peaks] * cfg.fruit_energy < cfg.base_cost)
+
+
+def test_fruit_is_patchy_and_wooded(built):
+    """Fruit has to be scarce and tied to real canopy, or it is just more grass.
+
+    The point of the resource is that it is worth travelling to and worth
+    remembering. A fruit layer smeared over most of the map would be neither.
+    """
+    cfg, tr = built
+    fcap = np.asarray(tr.fruit_capacity)
+    forest = np.asarray(tr.forest)
+
+    present = fcap > 0.0
+    assert present.any(), "no fruit anywhere"
+    assert present.mean() < 0.25, (
+        f"fruit covers {100*present.mean():.1f}% of the map -- not patchy")
+
+    # Assert on capacity, not presence. Where fruit *can* occur is set by the
+    # sine lattice, which knows nothing about trees; it is the `forest ** 2`
+    # factor on the magnitude that ties the resource to canopy. Testing presence
+    # measures the lattice and would pass for a fruit layer scattered over open
+    # grassland.
+    land = np.asarray(tr.height) >= cfg.sea_level
+    weighted_forest = float((fcap * forest).sum() / fcap.sum())
+    assert weighted_forest > 1.8 * float(forest[land].mean()), (
+        f"capacity-weighted canopy {weighted_forest:.3f} vs land mean "
+        f"{forest[land].mean():.3f} -- fruit is not a forest resource")
 
 
 def test_world_is_habitable(built):

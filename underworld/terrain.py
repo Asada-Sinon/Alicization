@@ -36,6 +36,7 @@ class Terrain(NamedTuple):
     forest: jax.Array      # f32 [n_cells]   canopy density in [0, 1]
     rock: jax.Array        # f32 [n_cells]   bare-rock fraction in [0, 1]
     capacity: jax.Array    # f32 [n_cells]   plant carrying capacity (replaces plant_max)
+    fruit_capacity: jax.Array  # f32 [n_cells]  fruit capacity: patchy, canopy-only
     rivers: jax.Array      # f32 [n_rivers, river_steps, 2]  traced polylines
 
 
@@ -192,7 +193,22 @@ def build(cfg: Config) -> Terrain:
     capacity = cfg.plant_max * fertility * (1.0 - rock)
     capacity = jnp.where(is_sea, 0.0, capacity)       # nothing grazes open water
 
+    # fruit: patches of a coprime sine lattice, kept to genuinely closed canopy.
+    # `forest ** 2` rather than `forest` is what makes fruit a forest resource
+    # instead of a canopy-weighted bonus on everything -- squaring pushes the
+    # thin edge canopy toward zero and concentrates it where the trees really are.
+    cx, cy = centers[:, 0], centers[:, 1]
+    px = jnp.sin(2.0 * jnp.pi * cfg.fruit_wavenumber_x * cx / cfg.world_size)
+    py = jnp.sin(2.0 * jnp.pi * cfg.fruit_wavenumber_y * cy / cfg.world_size)
+    patch = jnp.clip(
+        (px * py - cfg.fruit_patch_threshold) / (1.0 - cfg.fruit_patch_threshold),
+        0.0, 1.0,
+    )
+    fruit_capacity = cfg.fruit_max * patch * (forest ** 2) * (1.0 - rock)
+    fruit_capacity = jnp.where(is_sea, 0.0, fruit_capacity)
+
     return Terrain(
         height=height, grad_x=grad_x, grad_y=grad_y, water_dist=water_dist,
-        forest=forest, rock=rock, capacity=capacity, rivers=rivers,
+        forest=forest, rock=rock, capacity=capacity,
+        fruit_capacity=fruit_capacity, rivers=rivers,
     )

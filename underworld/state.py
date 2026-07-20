@@ -36,6 +36,7 @@ class WorldState(NamedTuple):
     last_input: jax.Array  # f32    [n_max, in_dim]     last retina input (inspector)
     last_output: jax.Array # f32    [n_max, out_dim]    last brain output (inspector)
     plant: jax.Array       # f32    [n_cells]    plant energy field (flattened grid)
+    fruit: jax.Array       # f32    [n_cells]    fruit field: patchy, canopy-only
 
 
 def diet_of(genome: jax.Array, cfg: Config) -> jax.Array:
@@ -89,6 +90,10 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         k_plant, (cfg.n_cells,), minval=0.0, maxval=2.0 * cfg.plant_init
     )
     plant = jnp.minimum(plant * (terrain.capacity / cfg.plant_max), terrain.capacity)
+    # Fruit starts at capacity: it regrows an order of magnitude slower than
+    # grass, so seeding it low would just mean no fruit exists for thousands of
+    # steps and the first measurements would be of a world without it.
+    fruit = terrain.fruit_capacity
 
     return WorldState(
         alive=alive, pos=pos, heading=heading, vel=vel, energy=energy, water=water,
@@ -98,6 +103,7 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         last_input=jnp.zeros((n, cfg.in_dim)),
         last_output=jnp.zeros((n, cfg.out_dim)),
         plant=plant,
+        fruit=fruit,
     )
 
 

@@ -26,16 +26,20 @@ def gradient(field: jax.Array, cfg: Config):
     return gx.reshape(-1), gy.reshape(-1)
 
 
-def regrow(plant: jax.Array, capacity: jax.Array, cfg: Config) -> jax.Array:
+def regrow(field: jax.Array, capacity: jax.Array, rate: float, baseline_rate: float,
+           ref_max: float) -> jax.Array:
     """Logistic regrowth toward a per-cell carrying capacity, plus a small
     spontaneous baseline so grazed-out cells can recover.
 
-    Same logistic form as before; `capacity` is simply a field now instead of the
-    scalar `plant_max`. The baseline is scaled by capacity too -- otherwise bare
-    rock and open water would sprout grass out of nothing.
+    `capacity` is a field rather than a scalar. The baseline is scaled by
+    capacity too -- otherwise bare rock and open water would sprout out of
+    nothing. Parameterised on (rate, baseline_rate, ref_max) so the grass and
+    fruit layers share one implementation: they differ only in how fast they come
+    back, and fruit's slowness is exactly what makes a remembered patch worth
+    something.
     """
     safe = jnp.maximum(capacity, 1e-6)
-    growth = cfg.regrow_rate * plant * (1.0 - plant / safe)
-    baseline = cfg.regrow_baseline * (capacity / cfg.plant_max)
-    plant = plant + growth + baseline
-    return jnp.clip(plant, 0.0, capacity)
+    growth = rate * field * (1.0 - field / safe)
+    baseline = baseline_rate * (capacity / ref_max)
+    field = field + growth + baseline
+    return jnp.clip(field, 0.0, capacity)

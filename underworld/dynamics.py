@@ -77,6 +77,31 @@ def graze(state: WorldState, cfg: Config):
     return energy, plant, gain, gain * cfg.forage_water_frac
 
 
+def eat_fruit(state: WorldState, cfg: Config):
+    """Foraging the canopy's high-value layer. Structurally identical to `graze`
+    -- same per-cell demand pool, same fair share, same herbivory taper -- but on
+    a field that is scarce, concentrated and slow to come back.
+
+    Returns (energy, fruit, fruit_gain, water_gain). Fruit carries water at the
+    same rate as grass; it is plant tissue either way.
+    """
+    cell = pos_to_cell(state.pos, cfg)
+    herbivory = jnp.where(
+        state.diet > cfg.carn_graze_cutoff, 0.0, (1.0 - state.diet) ** 6
+    )
+    demand = cfg.fruit_eat_rate * herbivory * state.alive
+
+    demand_per_cell = jnp.zeros(cfg.n_cells).at[cell].add(demand)
+    removed_per_cell = jnp.minimum(demand_per_cell, state.fruit)
+    frac = jnp.where(demand_per_cell > 0, removed_per_cell / demand_per_cell, 0.0)
+    taken = demand * frac[cell]
+    gain = taken * cfg.fruit_energy * cfg.eat_efficiency
+
+    energy = state.energy + gain
+    fruit = state.fruit - removed_per_cell
+    return energy, fruit, gain, taken * cfg.forage_water_frac
+
+
 def drink(state: WorldState, terrain, cfg: Config):
     """Hydration: standing in a river or at the sea refills water, uncapped by any
     shared demand pool (flowing water isn't meaningfully depleted at this scale,

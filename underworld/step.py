@@ -36,11 +36,13 @@ def build_step(cfg: Config, terrain):
 
         # 4. graze/drink, then hunt (neighbours re-indexed after moving), then metabolism
         energy, plant, food_gain, forage_water = dynamics.graze(state, cfg)
+        state = state._replace(energy=energy, plant=plant)
+        energy, fruit, fruit_gain, fruit_water = dynamics.eat_fruit(state, cfg)
         water, drink_gain = dynamics.drink(state, terrain, cfg)
-        # Forage water lands inside the same cap as drinking, so grazing can
+        # Forage water lands inside the same cap as drinking, so eating can
         # top a tank up but never overfill one past what a river would.
-        water = jnp.minimum(water + forage_water, cfg.water_max)
-        state = state._replace(energy=energy, water=water, plant=plant)
+        water = jnp.minimum(water + forage_water + fruit_water, cfg.water_max)
+        state = state._replace(energy=energy, water=water, fruit=fruit)
         table2 = spatial.build_table(state, cfg)
         nbr2 = spatial.gather_neighbors(state, table2, cfg)
         _d2, dist2, valid2 = spatial.geometry(state, nbr2, cfg)
@@ -51,8 +53,8 @@ def build_step(cfg: Config, terrain):
         water = dynamics.thirst(water, thrust, state.alive, cfg)
         state = state._replace(
             energy=energy, water=water, age=state.age + state.alive,
-            last_food=food_gain, last_meat=meat_gain, last_damage=damage,
-            last_drink=drink_gain + meat_water_gain + forage_water,
+            last_food=food_gain + fruit_gain, last_meat=meat_gain, last_damage=damage,
+            last_drink=drink_gain + meat_water_gain + forage_water + fruit_water,
         )
 
         # 5. death -> 6. birth
@@ -61,7 +63,11 @@ def build_step(cfg: Config, terrain):
 
         # 7. plants regrow; refresh the cached diet for the whole population
         state = state._replace(
-            plant=ecology.regrow(state.plant, terrain.capacity, cfg),
+            plant=ecology.regrow(state.plant, terrain.capacity, cfg.regrow_rate,
+                                 cfg.regrow_baseline, cfg.plant_max),
+            fruit=ecology.regrow(state.fruit, terrain.fruit_capacity,
+                                 cfg.fruit_regrow_rate, cfg.fruit_regrow_baseline,
+                                 cfg.fruit_max),
             diet=diet_of(state.genome, cfg),
         )
 

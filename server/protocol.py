@@ -2,7 +2,7 @@
 
 One message per frame, little-endian:
 
-    header (64 bytes):
+    header (68 bytes):
         magic             4s   b"UNDW"
         frame             u32
         n_agents          u32
@@ -19,8 +19,15 @@ One message per frame, little-endian:
         herb_speed        f32
         mean_elevation    f32
         forest_frac       f32
+        fruit_total       f32
     agents  (n_agents * 20 bytes): x f32, y f32, diet f32, energy f32, id f32
     plant   (grid*grid bytes):     u8, plant energy scaled to [0,255]
+    fruit   (grid*grid bytes):     u8, fruit scaled by fruit_max
+
+v6 added `fruit_total` and the fruit plane. Both went on the *end* of their
+section, which is why no existing client offset moved: the header grew 64 -> 68
+with the new float last, and the fruit plane follows the plant plane. Inserting
+either one further up would have silently shifted every read after it.
 
 Terrain is static for a whole run and travels in its own one-shot message
 (`encode_terrain`, magic b"UNTR"), sent on connect and after a reset, rather than
@@ -49,7 +56,7 @@ import numpy as np
 
 MAGIC = b"UNDW"
 TERRAIN_MAGIC = b"UNTR"
-_HEADER = struct.Struct("<4sIII ffffffffffff")
+_HEADER = struct.Struct("<4sIII fffffffffffff")
 _TERRAIN_HEADER = struct.Struct("<4sIf")
 
 
@@ -79,8 +86,9 @@ def encode_terrain(height: np.ndarray, forest: np.ndarray, water_dist: np.ndarra
 
 
 def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
-           energy: np.ndarray, plant: np.ndarray, grid: int, world_size: float,
-           plant_max: float, metrics: dict) -> bytes:
+           energy: np.ndarray, plant: np.ndarray, fruit: np.ndarray, grid: int,
+           world_size: float, plant_max: float, fruit_max: float,
+           metrics: dict) -> bytes:
     idx = np.nonzero(alive)[0]
     n = int(idx.size)
 
@@ -98,6 +106,7 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
         float(metrics.get("herb_speed", 0.0)),
         float(metrics.get("mean_elevation", 0.0)),
         float(metrics.get("forest_frac", 0.0)),
+        float(metrics.get("fruit_total", 0.0)),
     )
 
     agents = np.empty((n, 5), dtype="<f4")
@@ -109,5 +118,10 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
 
     plant_u8 = np.clip(plant / max(plant_max, 1e-6), 0.0, 1.0)
     plant_u8 = (plant_u8 * 255.0).astype(np.uint8)
+    # Scaled by fruit_max, not by the local capacity: the client should see where
+    # fruit is actually dense, not where each cell happens to be full relative to
+    # its own small ceiling.
+    fruit_u8 = np.clip(fruit / max(fruit_max, 1e-6), 0.0, 1.0)
+    fruit_u8 = (fruit_u8 * 255.0).astype(np.uint8)
 
-    return header + agents.tobytes() + plant_u8.tobytes()
+    return header + agents.tobytes() + plant_u8.tobytes() + fruit_u8.tobytes()
