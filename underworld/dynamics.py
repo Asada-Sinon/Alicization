@@ -44,7 +44,15 @@ def act(state: WorldState, outputs: jax.Array, terrain, cfg: Config):
 def graze(state: WorldState, cfg: Config):
     """Herbivory: agents drain the plant field under them, fairly sharing a
     cell's yield. Carnivores (high diet) barely graze. Returns (energy, plant,
-    food_gain).
+    food_gain, water_gain).
+
+    Forage carries water. Real herbivores draw much of their intake preformed
+    from what they eat -- enough that species on moist forage can go without
+    drinking entirely -- so a diet of nothing but dry plants was what pinned this
+    population to the riverbank. The subsidy rides on `gain`, which is already
+    the post-competition share, so it self-limits exactly where it should: a
+    crowd grazing one cell down gets proportionally less water from it, and a
+    stripped cell yields none at all.
     """
     cell = pos_to_cell(state.pos, cfg)
     # Grazing skill falls off *steeply* with diet ((1-diet)^6): even a
@@ -66,7 +74,7 @@ def graze(state: WorldState, cfg: Config):
 
     energy = state.energy + gain
     plant = state.plant - removed_per_cell
-    return energy, plant, gain
+    return energy, plant, gain, gain * cfg.forage_water_frac
 
 
 def drink(state: WorldState, terrain, cfg: Config):

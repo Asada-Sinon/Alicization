@@ -35,8 +35,11 @@ def build_step(cfg: Config, terrain):
         state, thrust, climb = dynamics.act(state, outputs, terrain, cfg)
 
         # 4. graze/drink, then hunt (neighbours re-indexed after moving), then metabolism
-        energy, plant, food_gain = dynamics.graze(state, cfg)
+        energy, plant, food_gain, forage_water = dynamics.graze(state, cfg)
         water, drink_gain = dynamics.drink(state, terrain, cfg)
+        # Forage water lands inside the same cap as drinking, so grazing can
+        # top a tank up but never overfill one past what a river would.
+        water = jnp.minimum(water + forage_water, cfg.water_max)
         state = state._replace(energy=energy, water=water, plant=plant)
         table2 = spatial.build_table(state, cfg)
         nbr2 = spatial.gather_neighbors(state, table2, cfg)
@@ -49,7 +52,7 @@ def build_step(cfg: Config, terrain):
         state = state._replace(
             energy=energy, water=water, age=state.age + state.alive,
             last_food=food_gain, last_meat=meat_gain, last_damage=damage,
-            last_drink=drink_gain + meat_water_gain,
+            last_drink=drink_gain + meat_water_gain + forage_water,
         )
 
         # 5. death -> 6. birth

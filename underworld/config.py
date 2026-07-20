@@ -143,6 +143,27 @@ class Config:
     base_water_cost: float = 0.02     # water / step just to exist
     move_water_cost: float = 0.05     # extra water / step at full thrust (panting)
     drink_rate: float = 2.0           # water gained / step while standing in the stream
+    forage_water_frac: float = 0.10   # water drawn per unit of energy grazed.
+    #                                   Measured: a herbivore at equilibrium takes
+    #                                   mean(last_food)=0.144/step and pays
+    #                                   0.0524/step for water at its realized thrust
+    #                                   of 0.65, so 0.10 is a ~27% subsidy -- it
+    #                                   stretches one-way range ~198 -> ~272 world
+    #                                   units (round trip 99 -> 136, comfortably
+    #                                   past the 35.5 median distance-to-water)
+    #                                   without making water a non-issue. Note the
+    #                                   strong invariant "grazing alone can never
+    #                                   sustain an agent" is NOT achievable at any
+    #                                   useful value: a forager crossing virgin
+    #                                   ground strips ~0.37 energy/step and goes
+    #                                   net-positive above frac~0.14. That is
+    #                                   ecologically correct -- inland self-
+    #                                   sufficiency is a low-density privilege that
+    #                                   disappears as the interior fills and the
+    #                                   field is drawn down. The invariant that
+    #                                   does hold is stated against the
+    #                                   *equilibrium* field; see
+    #                                   test_forage_water_cannot_replace_drinking.
 
     # --- life cycle ---
     energy_init: float = 8.0

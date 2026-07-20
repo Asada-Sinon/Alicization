@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from underworld import Config, new_world
+from underworld import dynamics
 from underworld import terrain as terrain_mod
 from underworld.state import init_state
 
@@ -145,6 +146,43 @@ def test_alive_energy_consistency():
     # Culled/empty slots that were never (re)born stay at zero-ish; at minimum
     # they must not hold reproducible energy above the threshold.
     assert bool(jnp.all(state.energy[dead] <= cfg.repro_threshold))
+
+
+def test_forage_water_cannot_replace_drinking():
+    """At equilibrium plant density, grazing subsidises thirst but never covers
+    it -- water stays a spatial constraint, not a rate one.
+
+    Stated against the *equilibrium* field on purpose. The stronger claim (that
+    grazing can never sustain an agent) is false at any useful `forage_water_frac`:
+    a forager crossing virgin ground strips far more than a standing one and does
+    go net-positive. That is the correct ecology -- inland self-sufficiency is a
+    low-density privilege that vanishes as the interior fills up and draws the
+    field down -- so the invariant is written where the population actually lives.
+    """
+    cfg = tiny_cfg()
+    state, _ms = run(cfg, 600)
+
+    herb = (state.alive & (state.diet < 0.35)).astype(jnp.float32)
+    n = jnp.maximum(jnp.sum(herb), 1.0)
+    food = float(jnp.sum(state.last_food * herb) / n)
+    thrust = 0.5 * (state.last_output[:, 1] + 1.0)
+    mean_thrust = float(jnp.sum(thrust * herb) / n)
+
+    subsidy = food * cfg.forage_water_frac
+    cost = cfg.base_water_cost + cfg.move_water_cost * mean_thrust
+    assert subsidy < 0.6 * cost, (
+        f"forage water {subsidy:.4f}/step covers {100*subsidy/cost:.0f}% of the "
+        f"{cost:.4f}/step thirst cost -- the river has stopped mattering")
+
+
+def test_forage_water_not_created_for_the_dead():
+    """Grazing must not hydrate culled slots -- `demand` is gated on `alive`."""
+    cfg = tiny_cfg()
+    state, _ms = run(cfg, 200)
+    _e, _p, gain, water_gain = dynamics.graze(state, cfg)
+    dead = ~state.alive
+    assert float(jnp.max(jnp.abs(gain[dead]))) == 0.0
+    assert float(jnp.max(jnp.abs(water_gain[dead]))) == 0.0
 
 
 def test_metrics_water_bounded():
