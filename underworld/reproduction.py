@@ -107,10 +107,11 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
     # Memory is NOT inherited -- newborns start with an empty map and have to
     # learn the world themselves. Genes are the heritable channel; memory is
     # acquired within a lifetime. An earlier version copied the parent's slots
-    # at birth, which is Lamarckian and was measured to do nothing anyway
-    # (n=6 paired: +0.020 mean inland_frac against a 0.031 SD of the difference,
-    # losing on 2 of 6 seeds). `place` handles the [n_max, slots, 3] rank without
-    # modification -- its `expand` is already generic.
+    # at birth, which is Lamarckian; the argument against it stands on its own
+    # and the burden was on the mechanism. The ablation was *underpowered*, not
+    # null: n=6 paired, +0.020 mean inland_frac, SD 0.031 -> p=0.175 at 25%
+    # power, but equivalence-bounded below 0.05 (TOST p=0.032). `place` handles
+    # the [n_max, slots, 3] rank without modification -- `expand` is generic.
     memory = place(state.memory, jnp.zeros_like(state.memory))
     last_input = place(state.last_input, jnp.zeros((cfg.n_max, cfg.in_dim)))
     last_output = place(state.last_output, jnp.zeros((cfg.n_max, cfg.out_dim)))
