@@ -143,6 +143,68 @@ def test_trample_impact_erodes_plant_capacity():
     assert bool(jnp.all(grown_on < grown_off))
 
 
+def test_trample_path_gain_default_is_truly_off():
+    """`trample_path_gain` defaults to 0.0 -- the sign-corrected companion to
+    `trample_impact` from docs/biology.md SS11.1 (real trail formation lowers
+    movement cost; it does not erode food capacity, which was measured to be a
+    *dispersing* feedback instead). Same backward-compatibility invariant as
+    `test_trample_default_is_truly_off`: trample_rate/trample_decay may differ,
+    but with trample_path_gain=0.0 `dynamics.act` never reads the field, so the
+    two runs must be identical downstream even though the trample fields
+    themselves differ.
+    """
+    cfg_a = tiny_cfg(trample_rate=0.01, trample_decay=0.99)
+    cfg_b = tiny_cfg(trample_rate=0.5, trample_decay=0.5)
+    assert cfg_a.trample_path_gain == 0.0 and cfg_b.trample_path_gain == 0.0
+
+    state_a, ms_a = run(cfg_a, 300)
+    state_b, ms_b = run(cfg_b, 300)
+
+    # The trample fields really did evolve differently under the two settings.
+    assert not bool(jnp.allclose(state_a.trample, state_b.trample))
+    # ...but nothing downstream of `path_relief` did.
+    assert bool(jnp.array_equal(state_a.alive, state_b.alive))
+    assert bool(jnp.array_equal(ms_a.population, ms_b.population))
+    assert bool(jnp.allclose(state_a.pos, state_b.pos, atol=1e-3))
+    assert bool(jnp.allclose(state_a.energy, state_b.energy, atol=1e-2))
+
+
+def test_trample_path_gain_speeds_up_forest_movement():
+    """When turned on, a trampled forest cell must cost less speed than an
+    untrampled one -- tested directly against `dynamics.act` rather than
+    end-to-end, for the same reason `test_trample_impact_erodes_plant_capacity`
+    is: comparing full-sim aggregates after divergence would confound the
+    mechanism under test with chaotic drift between runs.
+    """
+    cfg = tiny_cfg(trample_path_gain=0.5, forest_slow=0.25)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+
+    # Force every living agent into the cell with the densest canopy, at full
+    # thrust, heading fixed, so any speed difference comes only from trample.
+    forest_cell = int(jnp.argmax(terrain.forest))
+    assert float(terrain.forest[forest_cell]) > 0.0
+    fx = (forest_cell % cfg.grid + 0.5) * cfg.cell_size
+    fy = (forest_cell // cfg.grid + 0.5) * cfg.cell_size
+    state = state._replace(
+        pos=jnp.tile(jnp.array([fx, fy]), (cfg.n_max, 1)),
+        heading=jnp.zeros(cfg.n_max),
+    )
+    outputs = jnp.tile(jnp.array([0.0, 1.0]), (cfg.n_max, 1))  # turn=0, thrust=1
+
+    trampled = state._replace(trample=jnp.ones(cfg.n_cells))
+    untrampled = state._replace(trample=jnp.zeros(cfg.n_cells))
+
+    state_t, _, _ = dynamics.act(trampled, outputs, terrain, cfg)
+    state_u, _, _ = dynamics.act(untrampled, outputs, terrain, cfg)
+
+    alive = state.alive
+    speed_t = jnp.linalg.norm(state_t.vel[alive], axis=1)
+    speed_u = jnp.linalg.norm(state_u.vel[alive], axis=1)
+    assert bool(jnp.all(speed_t > speed_u))
+
+
 def test_population_bounded():
     cfg = tiny_cfg()
     state, ms = run(cfg, 300)
