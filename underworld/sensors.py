@@ -69,7 +69,13 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     # This is what prey_val/pred_val cannot express by construction -- they are
     # built from a signed difference, so they are both exactly zero at the same
     # point where this is at its peak.
-    peer_val = closeness * (1.0 - jnp.abs(di - diet_j))
+    # `peer_channel_enabled` is a Python bool baked into the jit (Config is
+    # closed over, not traced), so this is a compile-time zero, not a per-step
+    # branch. It is an ablation arm's control switch: the channel stays present
+    # in `in_dim` (so a genome trained with it on still loads against an
+    # ablation run) but contributes no signal when off.
+    peer_scale = 1.0 if cfg.peer_channel_enabled else 0.0
+    peer_val = closeness * (1.0 - jnp.abs(di - diet_j)) * peer_scale
 
     prey_cols, pred_cols, peer_cols = [], [], []
     for s in range(R):

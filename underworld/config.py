@@ -220,6 +220,18 @@ class Config:
     hue_drift: float = 0.02           # lineage colour drift per birth
     carnivore_init_frac: float = 0.05  # fraction of founders seeded as carnivores
 
+    # --- ablation switches (do not change any array shape) ---
+    peer_channel_enabled: bool = True  # the `peer` retina channel (see
+    #                                    sensors.sense) has no natural "off"
+    #                                    position -- it is part of the sensory
+    #                                    layer, so there is no pre-channel
+    #                                    population to compare against. This
+    #                                    flag forces peer_val to zero everywhere
+    #                                    while leaving `in_dim`/`genome_size`
+    #                                    unchanged, so an ablation arm and the
+    #                                    full arm remain genome-compatible and
+    #                                    directly comparable.
+
     # --- plants (logistic regrowth toward carrying capacity) ---
     plant_max: float = 2.2         # carrying capacity per cell: kept moderate on
     #                                purpose -- a dense plant field sustains a dense
