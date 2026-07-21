@@ -197,6 +197,29 @@ class Config:
     hue_drift: float = 0.02           # lineage colour drift per birth
     carnivore_init_frac: float = 0.05  # fraction of founders seeded as carnivores
 
+    # --- diet speciation mechanism: four ablatable switches ---
+    # `docs/biology.md` §10.1/§10.5: the herbivore/carnivore split is currently
+    # held apart by four independent layers, not by selection alone. Each flag
+    # below defaults to the current (baked-in) behaviour, so flipping none of
+    # them changes nothing; `--set NAME=0` turns one off for an ablation arm.
+    diet_bimodal_init: bool = True     # False: founders start from a single
+    #                                    neutral cluster (diet gene centred on
+    #                                    0, i.e. omnivore) instead of two.
+    diet_crossover_exempt: bool = True  # False: diet gene is a normal
+    #                                    crossover site like any other gene,
+    #                                    instead of always taken from parent A.
+    diet_mutation_asymmetric: bool = True  # False: diet mutates at the same
+    #                                    `mutation_sigma` as brain genes,
+    #                                    instead of the slower `diet_mutation_sigma`.
+    assortative_mating: bool = True    # False: second parents are paired
+    #                                    uniformly at random instead of
+    #                                    sorted by diet -- per Dieckmann &
+    #                                    Doebeli (1999), this is the layer
+    #                                    theory says *maintains* a branch
+    #                                    rather than just seeding one, so it
+    #                                    is tested separately from the other
+    #                                    three (see docs/TODO.md priority 2).
+
     # --- plants (logistic regrowth toward carrying capacity) ---
     plant_max: float = 2.2         # carrying capacity per cell: kept moderate on
     #                                purpose -- a dense plant field sustains a dense

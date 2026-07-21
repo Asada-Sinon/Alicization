@@ -22,9 +22,14 @@ def mutate(genome: jax.Array, key: jax.Array, cfg: Config) -> jax.Array:
     originally tuned for. And it means the body drifts slower than the brain can
     track it -- a controller is rarely far from the body it is controlling, which
     is the standing problem with co-evolving morphology and control.
+
+    `cfg.diet_mutation_asymmetric=False` is the ablation arm for the first half
+    of that claim (docs/biology.md §10.1): diet then mutates at the same
+    `mutation_sigma` as every brain gene instead of the slower `diet_mutation_sigma`.
     """
     sigma = jnp.full((cfg.genome_size,), cfg.mutation_sigma)
-    sigma = sigma.at[cfg.diet_index].set(cfg.diet_mutation_sigma)
+    diet_sigma = cfg.diet_mutation_sigma if cfg.diet_mutation_asymmetric else cfg.mutation_sigma
+    sigma = sigma.at[cfg.diet_index].set(diet_sigma)
     sigma = sigma.at[cfg.invest_index].set(cfg.invest_mutation_sigma)
     return genome + jax.random.normal(key, genome.shape) * sigma
 
@@ -47,7 +52,12 @@ def crossover(genome_a: jax.Array, genome_b: jax.Array, key: jax.Array,
     distinct (diet) or that the brain is adapted to it and an intermediate value
     would mismatch (a future body-size or speed gene). Investment is neither: it
     is read once at birth and never enters the sensorimotor loop at all.
+
+    `cfg.diet_crossover_exempt=False` is the ablation arm for this exemption
+    (docs/biology.md §10.1): diet then recombines like any other gene, letting
+    two parents of different types produce an intermediate-diet child.
     """
     take_b = jax.random.bernoulli(key, 0.5, genome_a.shape)
-    take_b = take_b.at[:, cfg.diet_index].set(False)
+    if cfg.diet_crossover_exempt:
+        take_b = take_b.at[:, cfg.diet_index].set(False)
     return jnp.where(take_b, genome_b, genome_a)

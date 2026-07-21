@@ -229,6 +229,88 @@ def test_investment_gene_is_bounded_and_heritable():
     assert 0.0 < float(np.mean(mixed[:, :cfg.brain_params])) < 1.0
 
 
+def test_diet_bimodal_init_can_be_switched_off():
+    """docs/biology.md §10.1: the herbivore/carnivore split starts from a
+    bimodal founder seeding by default. `diet_bimodal_init=False` is the
+    ablation arm -- founders should start from one neutral cluster instead."""
+    cfg = tiny_cfg(n_max=4000, n_init=4000, carnivore_init_frac=0.5)
+    key = jax.random.PRNGKey(0)
+    state = init_state(cfg, key, terrain_mod.build(cfg))
+    diet_gene = state.genome[:, cfg.diet_index]
+    mid_frac = float(jnp.mean((diet_gene > -0.5) & (diet_gene < 0.5)))
+    assert mid_frac < 0.1, f"expected a bimodal split, got {mid_frac:.2f} in the middle"
+
+    cfg2 = tiny_cfg(n_max=4000, n_init=4000, carnivore_init_frac=0.5,
+                     diet_bimodal_init=False)
+    state2 = init_state(cfg2, key, terrain_mod.build(cfg2))
+    diet_gene2 = state2.genome[:, cfg2.diet_index]
+    mid_frac2 = float(jnp.mean((diet_gene2 > -0.5) & (diet_gene2 < 0.5)))
+    assert mid_frac2 > 0.5, f"expected one neutral cluster, got {mid_frac2:.2f} in the middle"
+
+
+def test_diet_crossover_exempt_can_be_switched_off():
+    """docs/biology.md §10.1: diet is exempt from crossover by default (always
+    taken from parent A). `diet_crossover_exempt=False` should let it recombine
+    like any other gene."""
+    cfg_default = tiny_cfg()
+    cfg_ablated = tiny_cfg(diet_crossover_exempt=False)
+    a = jnp.zeros((cfg_default.n_max, cfg_default.genome_size)).at[:, cfg_default.diet_index].set(-3.0)
+    b = jnp.ones((cfg_default.n_max, cfg_default.genome_size)).at[:, cfg_default.diet_index].set(3.0)
+
+    mixed_default = np.asarray(genome_mod.crossover(a, b, jax.random.PRNGKey(0), cfg_default))
+    assert np.all(mixed_default[:, cfg_default.diet_index] == -3.0), \
+        "default: diet must always come from parent A"
+
+    mixed_ablated = np.asarray(genome_mod.crossover(a, b, jax.random.PRNGKey(0), cfg_ablated))
+    diet_col = mixed_ablated[:, cfg_ablated.diet_index]
+    assert set(np.unique(diet_col)) == {-3.0, 3.0}, "diet must recombine when exemption is off"
+    assert 0.2 < float((diet_col == 3.0).mean()) < 0.8, "recombination looks biased"
+
+
+def test_diet_mutation_asymmetric_can_be_switched_off():
+    """docs/biology.md §10.1: diet mutates at a slower `diet_mutation_sigma` by
+    default. `diet_mutation_asymmetric=False` should make it mutate at the same
+    rate as brain genes."""
+    cfg_default = tiny_cfg()
+    cfg_symmetric = tiny_cfg(diet_mutation_asymmetric=False)
+    genome = jnp.zeros((20000, cfg_default.genome_size))
+    key = jax.random.PRNGKey(0)
+
+    mutated_default = genome_mod.mutate(genome, key, cfg_default)
+    sd_default = float(jnp.std(mutated_default[:, cfg_default.diet_index]))
+    assert sd_default == pytest.approx(cfg_default.diet_mutation_sigma, rel=0.05)
+
+    mutated_symmetric = genome_mod.mutate(genome, key, cfg_symmetric)
+    sd_symmetric = float(jnp.std(mutated_symmetric[:, cfg_symmetric.diet_index]))
+    brain_sd = float(jnp.std(mutated_symmetric[:, 0]))
+    assert sd_symmetric == pytest.approx(cfg_default.mutation_sigma, rel=0.05)
+    assert sd_symmetric == pytest.approx(brain_sd, rel=0.05), \
+        "diet should mutate at the same rate as a brain gene when symmetric"
+
+
+def test_assortative_mating_can_be_switched_off():
+    """docs/biology.md §10.1/§10.5: partners are sorted by diet (assortative)
+    by default, so paired agents have near-identical diet. `assortative_mating
+    =False` should pair reproducers uniformly at random instead -- the switch
+    that theory (Dieckmann & Doebeli 1999) says is what *maintains* a branch,
+    so it is tested separately from the other three diet switches."""
+    n = 2000
+    want = jnp.ones(n, dtype=bool)
+    diet = jnp.linspace(0.0, 1.0, n)
+    key = jax.random.PRNGKey(0)
+
+    cfg_assort = tiny_cfg(n_max=n, n_init=n)
+    partner_assort = reproduction._assortative_mate(want, diet, cfg_assort, key)
+    diff_assort = float(jnp.mean(jnp.abs(diet - diet[partner_assort])))
+
+    cfg_random = tiny_cfg(n_max=n, n_init=n, assortative_mating=False)
+    partner_random = reproduction._assortative_mate(want, diet, cfg_random, key)
+    diff_random = float(jnp.mean(jnp.abs(diet - diet[partner_random])))
+
+    assert diff_assort < 0.05, "assortative mating should pair near-identical diets"
+    assert diff_random > diff_assort * 5, "random pairing should not track diet"
+
+
 def test_memory_is_not_heritable():
     """A newborn starts with an empty map, and the parent keeps its own.
 
