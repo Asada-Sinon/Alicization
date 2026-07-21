@@ -98,6 +98,31 @@ Keep out of the repo: screenshots, scratch scripts, `node_modules`, and anything
 under `outputs/ checkpoints/ runs/`. `.gitignore` covers `*.log` and the usual
 Python/venv noise, but scratch work belongs in the session scratchpad, not here.
 
+## Research lands in `docs/`, or it did not happen
+
+**Any investigation whose output is a conclusion rather than code MUST be written
+to a file under `docs/` and committed before the task is considered done.** A
+report that exists only in conversation is lost at the next context compaction —
+this has already happened once: a full feasibility study on moving to 3D was
+completed, verbally relayed, acted on by nobody, and then vanished, so the same
+question had to be asked again from scratch weeks later.
+
+- One topic, one file: `docs/<topic>.md`. Long is fine. These are allowed — and
+  encouraged — to read like literature reviews: full prose, real citations
+  (author, year, venue), tables, derivations, dead ends. They are not prompts
+  and should not be compressed into bullet-point instructions.
+- **Mark every claim by how it was established.** `docs/biology.md` uses
+  `[现实]` (published fact), `[本世界实测]` (measured here), `[对应]` (where it
+  lands in the code), `[提案，非结论]` (proposal, not a finding). Reuse that
+  vocabulary. State plainly when a source could not be verified rather than
+  laundering it into confident prose.
+- Add a one-line pointer in `docs/TODO.md` so the next session finds it without
+  reading everything.
+- Negative and inconclusive results are the point, not an embarrassment — most
+  of §9, §11, §12 and §13 of `docs/biology.md` are failures, and they are the
+  most load-bearing sections in the file because they stop the same idea being
+  re-attempted.
+
 ## Architecture
 
 ### The kernel is one jitted pure function
