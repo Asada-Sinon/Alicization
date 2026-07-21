@@ -38,6 +38,12 @@ class WorldState(NamedTuple):
     plant: jax.Array       # f32    [n_cells]    plant energy field (flattened grid)
     fruit: jax.Array       # f32    [n_cells]    fruit field: patchy, canopy-only
     memory: jax.Array      # f32 [n_max, slots, 3]  (dx, dy, strength) -- see memory.py
+    trample: jax.Array     # f32    [n_cells]    recent foot traffic, in [0, 1] --
+    #                                              passive niche construction (Stage 0,
+    #                                              see docs/TODO.md priority 3). A
+    #                                              per-*cell* field like plant/fruit,
+    #                                              not per-agent, so reproduction.place()
+    #                                              needs no change for it.
 
 
 def diet_of(genome: jax.Array, cfg: Config) -> jax.Array:
@@ -136,6 +142,8 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         # natural argmin target, so the first drink each agent takes fills a slot
         # rather than overwriting one.
         memory=jnp.zeros((n, cfg.memory_slots, 3)),
+        # No one has walked anywhere yet.
+        trample=jnp.zeros(cfg.n_cells),
     )
 
 

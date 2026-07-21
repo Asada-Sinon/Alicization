@@ -48,7 +48,9 @@ def test_shapes():
     assert s.plant.shape == (cfg.n_cells,)
     assert s.fruit.shape == (cfg.n_cells,)
     assert s.memory.shape == (cfg.n_max, cfg.memory_slots, 3)
+    assert s.trample.shape == (cfg.n_cells,)
     assert int(jnp.sum(s.alive)) == cfg.n_init
+    assert float(jnp.max(jnp.abs(s.trample))) == 0.0  # no one has walked yet
 
 
 def test_no_nans_and_invariants():
@@ -64,6 +66,9 @@ def test_no_nans_and_invariants():
     # Plant field stays within [0, carrying capacity].
     assert float(jnp.min(state.plant)) >= 0.0
     assert float(jnp.max(state.plant)) <= cfg.plant_max + 1e-4
+    # Trample field is bounded in [0, 1] by construction (clipped every step).
+    assert float(jnp.min(state.trample)) >= 0.0
+    assert float(jnp.max(state.trample)) <= 1.0 + 1e-6
     # Positions stay on the torus.
     assert float(jnp.min(state.pos)) >= 0.0
     assert float(jnp.max(state.pos)) < cfg.world_size
@@ -84,6 +89,58 @@ def test_layer_can_be_switched_off():
         assert bool(jnp.all(jnp.isfinite(arr))), f"non-finite in {name}"
     assert float(jnp.max(state.fruit)) == 0.0
     assert int(jnp.sum(state.alive)) > 0
+
+
+def test_trample_default_is_truly_off():
+    """`trample_impact` defaults to 0.0 (docs/TODO.md priority 3, Stage 0), the
+    reverse of `fruit_max`'s "0 disables" convention -- this mechanism doesn't
+    exist unless an ablation arm explicitly turns it on. The field itself still
+    accumulates every step (it costs nothing not to), so the real invariant is
+    that its *dynamics* (rate, decay) must have zero effect on the rest of the
+    sim when impact=0 -- proving it is inert, not merely small. Two configs
+    with wildly different trample_rate/trample_decay but the same seed and
+    trample_impact=0.0 must produce the same world, even though their trample
+    fields themselves differ.
+    """
+    cfg_a = tiny_cfg(trample_rate=0.01, trample_decay=0.99)
+    cfg_b = tiny_cfg(trample_rate=0.5, trample_decay=0.5)
+    assert cfg_a.trample_impact == 0.0 and cfg_b.trample_impact == 0.0
+
+    state_a, ms_a = run(cfg_a, 300)
+    state_b, ms_b = run(cfg_b, 300)
+
+    # The trample fields really did evolve differently under the two settings.
+    assert not bool(jnp.allclose(state_a.trample, state_b.trample))
+    # ...but nothing downstream of `effective_capacity` did: same life/death
+    # structure and matching plant/energy fields (tolerance matches
+    # test_determinism's allowance for GPU scatter-add reordering).
+    assert bool(jnp.array_equal(state_a.alive, state_b.alive))
+    assert bool(jnp.array_equal(ms_a.population, ms_b.population))
+    assert bool(jnp.allclose(state_a.plant, state_b.plant, atol=1e-4))
+    assert bool(jnp.allclose(state_a.energy, state_b.energy, atol=1e-2))
+
+
+def test_trample_impact_erodes_plant_capacity():
+    """When actually turned on, trample must erode what a cell can grow.
+
+    Tested directly against `ecology.regrow` with a fixed trample field rather
+    than by running the full sim: over a long horizon, two arms with different
+    capacity from step 1 onward diverge chaotically in population and
+    position (much like two different seeds), so comparing aggregate `plant`
+    totals after a run is confounded by that divergence, not just by the
+    mechanism under test.
+    """
+    from underworld import ecology
+    cfg = tiny_cfg(trample_impact=0.5)
+    capacity = jnp.full((cfg.n_cells,), cfg.plant_max)
+    trample = jnp.ones((cfg.n_cells,))  # maximum trample everywhere
+    effective = jnp.clip(capacity * (1.0 - trample * cfg.trample_impact), 0.0, None)
+    field = jnp.full((cfg.n_cells,), cfg.plant_max)  # start saturated at capacity
+    grown_on = ecology.regrow(field, effective, cfg.regrow_rate,
+                              cfg.regrow_baseline, cfg.plant_max)
+    grown_off = ecology.regrow(field, capacity, cfg.regrow_rate,
+                               cfg.regrow_baseline, cfg.plant_max)
+    assert bool(jnp.all(grown_on < grown_off))
 
 
 def test_population_bounded():
