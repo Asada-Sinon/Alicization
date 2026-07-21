@@ -69,6 +69,23 @@ def test_no_nans_and_invariants():
     assert float(jnp.max(state.pos)) < cfg.world_size
 
 
+def test_layer_can_be_switched_off():
+    """A zeroed resource layer is a control arm, not a crash.
+
+    `fruit_max=0` is how "is the fruit layer doing anything?" gets answered, so
+    the kernel has to survive a capacity field that is identically zero. It did
+    not: `regrow`'s baseline divided by `ref_max`, giving 0/0, and the NaN spread
+    through energy into position -- the run still printed a flat population and a
+    plausible-looking table, which is the failure mode worth a test.
+    """
+    cfg = tiny_cfg(fruit_max=0.0)
+    state, ms = run(cfg, 300)
+    for name, arr in state._asdict().items():
+        assert bool(jnp.all(jnp.isfinite(arr))), f"non-finite in {name}"
+    assert float(jnp.max(state.fruit)) == 0.0
+    assert int(jnp.sum(state.alive)) > 0
+
+
 def test_population_bounded():
     cfg = tiny_cfg()
     state, ms = run(cfg, 300)

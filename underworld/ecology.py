@@ -40,6 +40,11 @@ def regrow(field: jax.Array, capacity: jax.Array, rate: float, baseline_rate: fl
     """
     safe = jnp.maximum(capacity, 1e-6)
     growth = rate * field * (1.0 - field / safe)
-    baseline = baseline_rate * (capacity / ref_max)
+    # `ref_max` is guarded because switching a layer off is a legitimate ablation
+    # arm (`--set fruit_max=0`), and there it is exactly zero while `capacity` is
+    # zero too -- 0/0 gave NaN, which then propagated through the whole state and
+    # produced a run that looked alive (population flat at n_init) rather than
+    # erroring. A silently plausible control arm is worse than a crash.
+    baseline = baseline_rate * (capacity / max(ref_max, 1e-6))
     field = field + growth + baseline
     return jnp.clip(field, 0.0, capacity)
