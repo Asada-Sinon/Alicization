@@ -485,6 +485,31 @@ def test_assortative_mating_can_be_switched_off():
     assert diff_random > diff_assort * 5, "random pairing should not track diet"
 
 
+def test_peer_channel_can_be_disabled():
+    """`peer_channel_enabled=False` is the ablation arm for the peer channel:
+    there is no pre-channel population to compare against (it's part of the
+    sensory layer), so the control has to be a forced-zero flag rather than a
+    removed input. `in_dim`/`genome_size` must stay identical to the enabled
+    config, or the two arms would not be genome-compatible."""
+    cfg_on = tiny_cfg(n_max=8, n_init=2, vision_radius=40.0)
+    cfg_off = tiny_cfg(n_max=8, n_init=2, vision_radius=40.0,
+                        peer_channel_enabled=False)
+    assert cfg_off.in_dim == cfg_on.in_dim
+    assert cfg_off.genome_size == cfg_on.genome_size
+
+    state, key, step_fn, _scan_fn, terrain = new_world(cfg_off)
+    pos = state.pos.at[0].set(jnp.array([cfg_off.world_size / 2, cfg_off.world_size / 2]))
+    pos = pos.at[1].set(jnp.array([cfg_off.world_size / 2, cfg_off.world_size / 2]))
+    state = state._replace(pos=pos, diet=jnp.full((cfg_off.n_max,), 0.5))
+    state, _ms = step_fn(state, key)
+
+    r = cfg_off.retina_sectors
+    peer_off = 5 * r + 3 + 4 * cfg_off.memory_slots
+    li = np.asarray(state.last_input[0])
+    assert float(np.max(li[peer_off:peer_off + r])) < 1e-6, \
+        "peer channel must be forced to zero when peer_channel_enabled=False"
+
+
 def test_memory_is_not_heritable():
     """A newborn starts with an empty map, and the parent keeps its own.
 

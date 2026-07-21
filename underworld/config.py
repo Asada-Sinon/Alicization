@@ -220,8 +220,10 @@ class Config:
     hue_drift: float = 0.02           # lineage colour drift per birth
     carnivore_init_frac: float = 0.05  # fraction of founders seeded as carnivores
 
-    # --- diet speciation mechanism: four ablatable switches ---
-    # `docs/biology.md` §10.1/§10.5: the herbivore/carnivore split is currently
+    # --- ablation switches: none of these change any array shape, so an arm
+    # with a switch flipped stays genome-compatible with the default arm ---
+    # Diet speciation, four layers. `docs/biology.md` §10.1/§10.5: the
+    # herbivore/carnivore split is currently
     # held apart by four independent layers, not by selection alone. Each flag
     # below defaults to the current (baked-in) behaviour, so flipping none of
     # them changes nothing; `--set NAME=0` turns one off for an ablation arm.
@@ -242,6 +244,16 @@ class Config:
     #                                    rather than just seeding one, so it
     #                                    is tested separately from the other
     #                                    three (see docs/TODO.md priority 2).
+    peer_channel_enabled: bool = True  # the `peer` retina channel (see
+    #                                    sensors.sense) has no natural "off"
+    #                                    position -- it is part of the sensory
+    #                                    layer, so there is no pre-channel
+    #                                    population to compare against. This
+    #                                    flag forces peer_val to zero everywhere
+    #                                    while leaving `in_dim`/`genome_size`
+    #                                    unchanged, so an ablation arm and the
+    #                                    full arm remain genome-compatible and
+    #                                    directly comparable.
 
     # --- plants (logistic regrowth toward carrying capacity) ---
     plant_max: float = 2.2         # carrying capacity per cell: kept moderate on
