@@ -25,9 +25,19 @@ The package is **not pip-installed**. Run everything from the repo root; scripts
 node --check web/main.js && node --check web/render.js       # no JS build step
 ```
 
-**The live server holds the whole GPU.** Running `pytest` while `run_live.py` is up
-fails with `CUDA_ERROR_OUT_OF_MEMORY`, and the server itself can get OOM-killed
-(exit 137). Kill the server before running tests.
+**`CUDA_ERROR_OUT_OF_MEMORY` here is almost always a preallocation artifact, not
+a real shortage.** JAX grabs 75% of the card up front (18.5 GB of 24 GB), so the
+*second* process to start fails even though a full-size run's real peak is
+**918 MiB** (measured, `n_max=16384`). Set
+
+```bash
+XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python ...
+```
+
+and a dozen runs coexist happily — which is how the multi-seed sweeps get run in
+parallel. Without it you are serialising jobs for no reason, and a live
+`run_live.py` will appear to "hold the whole GPU" (it does not; it holds the
+preallocation).
 
 There is no linter, formatter, or JS toolchain configured. `web/` is plain
 ES5-flavoured JS served statically by FastAPI — no bundler, no `node_modules`.
@@ -71,11 +81,15 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 Before committing, make sure the work actually holds:
 
 ```bash
-pkill -f "[s]cripts/run_live.py"    # the server holds the GPU; brackets stop
-                                    # the pattern matching its own shell
-.venv/bin/python -m pytest
+pkill -f "[s]cripts/run_live.py"    # brackets stop the pattern matching its
+                                    # own shell. Only needed if you did NOT
+                                    # set PREALLOCATE=false above.
+XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python -m pytest
 node --check web/main.js && node --check web/render.js   # if web/ changed
 ```
+
+The full suite takes several minutes — give it a long timeout rather than
+assuming it hung.
 
 Wire-format or shader changes need more than tests — see the contracts section below;
 verify them against a running server or a screenshot before committing.
