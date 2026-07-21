@@ -4,6 +4,7 @@ and checks for the M0 emergence signal: agents evolve to move toward food.
 
 Usage:
     .venv/bin/python scripts/run_headless.py [total_steps] [chunk] [--seed N] [--json]
+                                             [--set FIELD=VALUE ...]
 """
 
 from __future__ import annotations
@@ -23,9 +24,32 @@ import numpy as np
 from underworld import Config, new_world
 
 
+def parse_overrides(pairs) -> dict:
+    """Turn `--set name=value` strings into typed kwargs for `dataclasses.replace`.
+
+    Ablations are how most claims here get falsified ("is the fruit layer doing
+    anything?" is answered by a `fruit_max=0` arm, not by reading the code), so
+    the control arm has to be reachable without editing `config.py` -- editing it
+    would make the two arms two different working trees. Values are coerced to
+    the field's declared type so `--set fruit_max=0` gives a float and
+    `--set n_init=200` an int, not strings that silently poison the jit.
+    """
+    types = {f.name: f.type for f in dataclasses.fields(Config)}
+    out = {}
+    for p in pairs or ():
+        name, _, raw = p.partition("=")
+        if name not in types:
+            raise SystemExit(f"--set: no Config field named {name!r}")
+        t = types[name]
+        # Annotations may be strings under `from __future__ import annotations`.
+        t = {"int": int, "float": float, "bool": bool}.get(t, t) if isinstance(t, str) else t
+        out[name] = (raw not in ("0", "False", "false")) if t is bool else t(raw)
+    return out
+
+
 def main(total_steps: int = 4000, chunk: int = 200, seed: int = 0,
-         as_json: bool = False) -> None:
-    cfg = dataclasses.replace(Config(), seed=seed)
+         as_json: bool = False, overrides: dict | None = None) -> None:
+    cfg = dataclasses.replace(Config(), seed=seed, **(overrides or {}))
     print(f"device: {jax.devices()[0]}")
     print(f"genome_size={cfg.genome_size}  n_max={cfg.n_max}  n_cells={cfg.n_cells}"
           f"  seed={cfg.seed}")
@@ -117,7 +141,8 @@ def main(total_steps: int = 4000, chunk: int = 200, seed: int = 0,
         print("JSON " + json.dumps({"seed": seed, "steps": done,
                                     "late_carn": late_carn, "min_pop": min_pop,
                                     **row, **summary,
-                                    "total_deaths": total_deaths}))
+                                    "total_deaths": total_deaths,
+                                    "overrides": overrides or {}}))
     coexist = 0.05 < late_carn < 0.95
     survived = min_pop >= 1
     if coexist and survived:
@@ -138,5 +163,10 @@ if __name__ == "__main__":
                          "terrain is derived from cfg alone and does not move")
     ap.add_argument("--json", action="store_true",
                     help="emit a final JSON line for multi-seed aggregation")
+    ap.add_argument("--set", action="append", metavar="FIELD=VALUE", dest="sets",
+                    help="override a Config field, e.g. --set fruit_max=0. "
+                         "Repeatable. For ablation arms -- keeps both arms on "
+                         "one working tree")
     args = ap.parse_args()
-    main(args.total_steps, args.chunk, args.seed, args.json)
+    main(args.total_steps, args.chunk, args.seed, args.json,
+         parse_overrides(args.sets))
