@@ -74,7 +74,7 @@ def build_step(cfg: Config, terrain):
         )
 
         # 5. death -> 6. birth
-        state = reproduction.cull(state, cfg)
+        state, deaths = reproduction.cull(state, water_damage, cfg)
         state = reproduction.reproduce(state, key, cfg)
 
         # 7. plants regrow; refresh the cached diet for the whole population
@@ -87,7 +87,7 @@ def build_step(cfg: Config, terrain):
             diet=diet_of(state.genome, cfg),
         )
 
-        return state, metrics.compute(state, terrain, cfg)
+        return state, metrics.compute(state, terrain, deaths, cfg)
 
     return jax.jit(world_step)
 

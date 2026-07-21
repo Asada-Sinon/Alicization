@@ -10,6 +10,8 @@ friendly.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import jax
 import jax.numpy as jnp
 
@@ -18,13 +20,68 @@ from .genome import crossover, mutate
 from .state import WorldState, invest_of
 
 
-def cull(state: WorldState, cfg: Config) -> WorldState:
+class Deaths(NamedTuple):
+    """Per-step death counts split by cause, plus the summed age of the dead in
+    each class.
+
+    Counts rather than fractions so a run can be summed and divided once at the
+    end; per-step fractions would weight a step with two deaths the same as a
+    step with two hundred. Age arrives as a *sum* for the same reason -- divide
+    by the matching count after summing the run to get mean age at death, which
+    is what separates "juveniles die before they learn the map" from "adults
+    misjudge an excursion". Those two want different mechanisms.
+    """
+    predation: jax.Array
+    starvation: jax.Array
+    thirst: jax.Array
+    senescence: jax.Array
+    age_predation: jax.Array
+    age_starvation: jax.Array
+    age_thirst: jax.Array
+    age_senescence: jax.Array
+
+
+def cull(state: WorldState, water_damage: jax.Array, cfg: Config):
     """Starvation, dehydration, and old age. Freed slots become available for
-    births."""
-    died = state.alive & (
-        (state.energy <= 0.0) | (state.water <= 0.0) | (state.age > cfg.max_age)
+    births. Returns `(state, Deaths)`.
+
+    Nothing here kills an agent *directly by predation* -- a bitten agent dies of
+    energy (or water) hitting zero like any other. So predation is attributed
+    **counterfactually**: a death counts as predation when the damage taken this
+    very step is what pushed the pool below zero, i.e. the agent would still have
+    a positive pool without it. That deliberately excludes the slow case where
+    repeated bites bled an agent down over many steps and metabolism finished the
+    job -- those land in `starvation`, which makes this a *lower bound* on how
+    much predation matters. A bite draws water as well as energy, hence
+    `water_damage`, which unlike `last_damage` is not carried on the state.
+
+    Causes are made mutually exclusive by priority (predation > starvation >
+    thirst > old age) so the four counts sum to the death toll and can be read
+    as a partition.
+    """
+    starved = state.energy <= 0.0
+    parched = state.water <= 0.0
+    aged = state.age > cfg.max_age
+    died = state.alive & (starved | parched | aged)
+
+    fatal_bite = (starved & (state.energy + state.last_damage > 0.0)) | \
+                 (parched & (state.water + water_damage > 0.0))
+    predation = died & fatal_bite
+    starvation = died & starved & ~predation
+    thirst = died & parched & ~predation & ~starvation
+    senescence = died & ~predation & ~starvation & ~thirst
+
+    deaths = Deaths(
+        predation=jnp.sum(predation),
+        starvation=jnp.sum(starvation),
+        thirst=jnp.sum(thirst),
+        senescence=jnp.sum(senescence),
+        age_predation=jnp.sum(state.age * predation),
+        age_starvation=jnp.sum(state.age * starvation),
+        age_thirst=jnp.sum(state.age * thirst),
+        age_senescence=jnp.sum(state.age * senescence),
     )
-    return state._replace(alive=state.alive & (~died))
+    return state._replace(alive=state.alive & (~died)), deaths
 
 
 def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config) -> jax.Array:

@@ -58,7 +58,21 @@ def main(total_steps: int = 4000, chunk: int = 200, seed: int = 0,
               f"{r['water_bound_frac']:>6.2f} {r['inland_frac']:>6.2f} {sps:>9.0f}")
         return r
 
+    # Death counts are per-step and must be *summed* over the whole run, not
+    # sampled at the chunk boundary like the state metrics above. Mean age at
+    # death is likewise a ratio of two run-long sums, not a mean of per-step
+    # means -- the latter would let a step with one death outvote a step with
+    # two hundred.
+    CAUSES = ("predation", "starvation", "thirst", "senescence")
+    ACC = tuple(f"death_{c}" for c in CAUSES) + tuple(f"deathage_{c}" for c in CAUSES)
+    toll = {k: 0.0 for k in ACC}
+
+    def tally(ms):
+        for k in ACC:
+            toll[k] += float(np.asarray(getattr(ms, k)).sum())
+
     first = report(chunk, ms, compile_t)
+    tally(ms)
     carn = [first["carnivore_frac"]]
     pops = [first["population"]]
     row = first
@@ -71,11 +85,27 @@ def main(total_steps: int = 4000, chunk: int = 200, seed: int = 0,
         dt = time.time() - t0
         done += chunk
         row = report(done, ms, dt)
+        tally(ms)
         carn.append(row["carnivore_frac"])
         pops.append(row["population"])
         if row["population"] < 1:
             print("!! population collapsed to zero")
             break
+
+    total_deaths = max(sum(toll[f"death_{c}"] for c in CAUSES), 1.0)
+    # Suffixed so these never collide with the same-named per-step counts that
+    # `row` carries into the JSON line below.
+    summary = {}
+    for c in CAUSES:
+        n = toll[f"death_{c}"]
+        summary[f"death_{c}_frac"] = n / total_deaths
+        summary[f"death_{c}_age"] = toll[f"deathage_{c}"] / max(n, 1.0)
+    print(f"\ndeaths by cause (whole run, n={total_deaths:.0f}), "
+          f"share and mean age at death:")
+    for c in CAUSES:
+        print(f"  {c:<11} {100 * summary[f'death_{c}_frac']:>5.1f}%   "
+              f"mean age {summary[f'death_{c}_age']:>7.1f} steps   "
+              f"(n={toll[f'death_{c}']:.0f})")
 
     # Emergence check: a stable ecosystem where herbivores AND carnivores coexist.
     late_carn = float(np.mean(carn[-max(1, len(carn) // 4):]))
@@ -86,7 +116,8 @@ def main(total_steps: int = 4000, chunk: int = 200, seed: int = 0,
         # re-parsing the table above.
         print("JSON " + json.dumps({"seed": seed, "steps": done,
                                     "late_carn": late_carn, "min_pop": min_pop,
-                                    **row}))
+                                    **row, **summary,
+                                    "total_deaths": total_deaths}))
     coexist = 0.05 < late_carn < 0.95
     survived = min_pop >= 1
     if coexist and survived:

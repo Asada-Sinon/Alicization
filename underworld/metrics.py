@@ -40,9 +40,23 @@ class Metrics(NamedTuple):
     mean_invest: jax.Array      # mean evolved fraction of energy given per birth
     invest_std: jax.Array       # spread (high => the population is not of one mind)
     invest_diet_corr: jax.Array # do carnivores provision differently from grazers?
+    # Death toll split by cause, as counts, and the summed age of the dead in
+    # each class (see reproduction.Deaths). Any claim that some trait could be
+    # selected for has to start here: a trait that reduces predation risk is
+    # worth nothing if predation is not killing anyone. Sum over a run, then
+    # divide -- per-step fractions would weight a two-death step like a
+    # two-hundred-death one, and mean age is a ratio of two sums.
+    death_predation: jax.Array
+    death_starvation: jax.Array
+    death_thirst: jax.Array
+    death_senescence: jax.Array
+    deathage_predation: jax.Array
+    deathage_starvation: jax.Array
+    deathage_thirst: jax.Array
+    deathage_senescence: jax.Array
 
 
-def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
+def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
     alive = state.alive.astype(jnp.float32)
     pop = jnp.sum(alive)
     denom = jnp.maximum(pop, 1.0)
@@ -96,4 +110,12 @@ def compute(state: WorldState, terrain, cfg: Config) -> Metrics:
         mean_invest=mean_invest,
         invest_std=jnp.sqrt(invest_var),
         invest_diet_corr=corr,
+        death_predation=deaths.predation.astype(jnp.float32),
+        death_starvation=deaths.starvation.astype(jnp.float32),
+        death_thirst=deaths.thirst.astype(jnp.float32),
+        death_senescence=deaths.senescence.astype(jnp.float32),
+        deathage_predation=deaths.age_predation.astype(jnp.float32),
+        deathage_starvation=deaths.age_starvation.astype(jnp.float32),
+        deathage_thirst=deaths.age_thirst.astype(jnp.float32),
+        deathage_senescence=deaths.age_senescence.astype(jnp.float32),
     )

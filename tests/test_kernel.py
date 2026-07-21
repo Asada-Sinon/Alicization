@@ -368,3 +368,46 @@ def test_metrics_water_bounded():
     # The two fractions partition opposite ends of the same axis: an agent
     # cannot be both inside the drinkable band and beyond the sensor's reach.
     assert np.all(m["water_bound_frac"] + m["inland_frac"] <= 1.0 + 1e-4)
+
+
+def test_death_causes_partition_the_toll():
+    """The four death counts must be a genuine partition of the deaths.
+
+    They are mutually exclusive by construction, so the real risk is the other
+    direction: a death that satisfies none of the four (and so vanishes) or an
+    off-by-one against the actual drop in `alive`. This checks against the truth
+    -- the number of alive bits `cull` clears -- rather than against itself.
+    """
+    cfg = tiny_cfg()
+    state, key, _step, _scan, terrain = new_world(cfg)
+
+    # Drive a step by hand so pre-cull state and the cull result are both in
+    # scope. Half the population is starved and a quarter dehydrated outright so
+    # the toll is large enough to be worth counting.
+    n = cfg.n_max
+    energy = jnp.where(jnp.arange(n) % 2 == 0, -1.0, state.energy)
+    water = jnp.where(jnp.arange(n) % 4 == 1, -1.0, state.water)
+    # Some of the starved were bitten hard enough this step that the bite is
+    # what did it; others were not bitten at all.
+    last_damage = jnp.where(jnp.arange(n) % 6 == 0, 5.0, 0.0)
+    water_damage = jnp.where(jnp.arange(n) % 12 == 1, 5.0, 0.0)
+    pre = state._replace(energy=energy, water=water, last_damage=last_damage)
+
+    post, deaths = reproduction.cull(pre, water_damage, cfg)
+
+    n_died = int(jnp.sum(pre.alive) - jnp.sum(post.alive))
+    total = int(deaths.predation + deaths.starvation + deaths.thirst
+                + deaths.senescence)
+    assert total == n_died, f"{total} counted vs {n_died} actually culled"
+    assert n_died > 0, "test set up no deaths at all"
+    # Age sums must be attributed to the same partition, or mean-age-at-death
+    # is computed against the wrong denominator.
+    age_total = float(deaths.age_predation + deaths.age_starvation
+                      + deaths.age_thirst + deaths.age_senescence)
+    expected = float(jnp.sum(pre.age * (pre.alive & ~post.alive)))
+    assert abs(age_total - expected) < 1e-3, f"{age_total} vs {expected}"
+    # The counterfactual arm must actually fire, or the predation count is
+    # vacuously correct and this test proves nothing about it.
+    assert int(deaths.predation) > 0
+    # The dead never come back to life.
+    assert bool(jnp.all(post.alive <= pre.alive))
