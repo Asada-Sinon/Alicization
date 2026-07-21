@@ -11,7 +11,7 @@
 1. **捕食者贴着河边住,是当前规则下的期望收益最大化行为,不是 bug。** 猎物密度本身就有约 3–4 倍的水点梯度(食草者虽然已经散到"满地图",但密度仍随离水距离衰减),`meat_water_frac=0.3` 让一次成功捕食同时解决能量与饮水,`attack_range=6.0` 很短且 `carn_cost` 持续计费,三者叠加把"守在猎物最密的地方等"变成严格优于"跑到内陆再等"的策略。
 2. **这确实和真实的伏击型顶级捕食者(狮子、鳄鱼)高度相似**——文献里有非常具体、可定量对照的先例(狮子按可捕获性而非猎物丰度选择猎杀地点,河流汇合带是显著正相关因子;鳄鱼在河岸伏击点的选址高度非随机)。但本世界**没有**真实生态系统里让捕食者不至于"终生睡在河里"的几条机制:landscape of fear(猎物的空间性风险规避)、捕食者种内/种间的地盘排斥、以及游走型捕食者对伏击型捕食者热点的主动回避——这些缺失才是被写进"病因清单"的部分。
 3. **本世界实测(6 配对种子,20000 步)证伪了一个看似最便宜的修复方案**:`--set meat_water_frac=0` 并没有让捕食者离开河边,反而让 `carn_water_dist` 从 11.57 降到 8.66(6/6 种子同向,p=0.031 地板值)——捕食者贴得**更**近了,因为猎物密度梯度本身从未被这个参数触碰,拿掉"捕食带水"的补贴只是逼着捕食者除了猎物之外还要专程去河里喝水,而喝水和捕食的最优地点是同一个地方。这是本文档最重要的一条负结果,直接否决了 prompt 里"最便宜的方案"。
-4. **"食草者比例失调"这个说法一旦有了判据,方向反而是相反的**:23% 的肉食比例(按个体数,不按生物量)对照真实营养级金字塔的经验规律(约 10% 转化效率、密度越高占比理应越低的幂律关系),**不是偏低而是偏高**——真实自然系统里食草者对捕食者的悬殊程度通常比本世界更极端,不是更轻。这与用户"食草者太多"的直觉方向正好相反,说明支持这个直觉的另有其事:真正候选的解释是总种群密度与食草者的高速度/高可见性带来的视觉判断,这是一个渲染/可见性问题,不是种群比例问题——但这条本身也要标注清楚哪些地方是推断、哪些是实测。
+4. **"食草者比例失调"这个说法一旦有了判据,方向不但相反,而且差距是数量级的**:本世界捕食者与食草者体型接近(`size` 基因两者没有系统性差异),这意味着按个体数算的 23% 可以直接当作约 30% 的捕食者/猎物**生物量**占比(Jonsson 2017 的形式化推导:体型比 ρ≈1 时数量金字塔与生物量金字塔是同一个数学对象)。对照 Carbone & Gittleman (2002) 实测的单一食肉物种基准(一万公斤猎物供养约 90 公斗食肉动物,即 0.9%)与 Hatton et al. (2015) measured 的密度-占比负相关幂律(P<10⁻⁹,跨 2950 个生态系统),本世界的 30% 比这些真实基准高出**约一个数量级(约 30 倍)**。这与用户"食草者太多"的直觉方向正好相反,说明支持这个直觉的另有其事:真正候选的解释是总种群密度与食草者的高速度/高可见性带来的视觉判断,这是一个渲染/可见性问题,不是种群比例问题——但这条本身也要标注清楚哪些地方是推断、哪些是实测。真正该深挖的反而是"为什么捕食者占比比任何真实系统都高这么多"(可能是 `carn_cost` 相对猎物能量太便宜,或食草者种群的有效周转速度太快),这是一个独立于河岸驻留主线的后续问题。
 5. **推荐顺序**(详见 §5):给猎物一条"危险记忆"(landscape of fear 的最小实现,复用已有的 memory 槽位机制,不需要新增张量维度)排第一;放大 `attack_range` 逼捕食者转向追击型是第二;`meat_water_frac` 调参**不推荐**(已被数据证伪方向);捕食者领地/排斥机制作为独立候选,风险未知,列在需要谨慎对照的一档。
 
 ---
@@ -230,37 +230,71 @@ meat_water_frac=0.3 让"守在猎物最密处"同时解决能量与饮水(§1.1)
 
 ## 3. "食草者比例失调"——先定义判据
 
-### 3.1 [现实] 真实生态系统的营养级生物量比例
+### 3.1 [现实] 真实生态系统的营养级生物量比例——一份专门的子任务核实了这一节,数字比最初能拿到的精确得多
 
-由子任务核实,摘录:
+这一节的第一版只有粗略的"个位数到低两位数百分比"印象;后续一个专门核实生物量金字塔数字的子任务给出了远为精确、可验证的结果,下面按它重写。
 
-**Lindeman (1942), *Ecology* 23(4):399–417,"The trophic-dynamic aspect of ecology"** 给出经典的约 10% 营养级转化效率经验法则——每上升一个营养级,可用生物量大致降到前一级的十分之一。这条经验法则有大量已知例外(某些水生系统、某些微生物主导系统可以出现"倒金字塔"),但作为数量级参照仍被广泛引用。
+**Elton (1927), *Animal Ecology*, 第五章**(子任务直接取得原文全文核实):"pyramid of numbers"这个说法的真正出处。Elton 自己给出的原因有两条,不是一条:"(a) 小动物通常被大动物捕食,(b) 小动物的增殖速度比大动物快,因此能供养后者"——**体型不对称是他给出的两个根本原因之一,不是附带观察**。他也给出了具体例子:一对贼鸥每年需要 50–100 只阿德利企鹅(Mawson);一头狮子每年杀死约 50 只斑马(Percival)。他同时承认例外(狼群"体型只有鹿的一半左右,但靠结群捕猎让自己等效于一头更大的动物";伶鼬甚至可以比猎物更小),但没有使用"倒金字塔"这个说法——那是后来的教科书概括,不是 Elton 原文用语,引用时需要区分。
 
-**Hatton, McCann et al. (2015), *Science* 349(6252):1070–1073,"The predator-prey power law: Biomass scaling across terrestrial and aquatic biomes"**(子任务核实了标题与核心结论,具体指数请以原文为准,子任务给出的印象是次线性标度,即捕食者生物量并非猎物生物量的固定比例,而是随猎物生物量增大而**相对**收缩的幂律关系)——含义是:**生产力/密度越高的系统,捕食者占比理应越低**,而不是越高。如果这条成立,它直接对本世界的判断给出一个方向性推论:本世界总种群密度(约 1100–1400 只/512² 世界,§3.2/§4.2.1 有具体数字)如果被认为是"高密度",那么按这条经验规律,预期的捕食者占比应该**更低**,而不是更高——23% 若真的偏离基线,偏离的方向应该是"过高"而非被用户的直觉误判为"过高的密度感"其实来自别处。
+**Lindeman (1942), *Ecology* 23(4):399–417**(子任务直接取得原文核实)**——这一条本文档第一版引用错了,需要在这里更正:Lindeman 从未提出一个扁平的"10% 法则",也从未称其为定律。** 他给塞达沼泽湖(Cedar Bog Lake)算出的"progressive efficiencies"是:生产者相对入射能量约 **0.10%**,初级消费(食草层)**13.3%**,次级消费(食肉层)**22.3%**——原文写的是效率**递增**,不是一个恒定的十分之一。他还引用 Swingle & Smith (1940) 阿拉巴马池塘游钓鱼数据给出的三级消费效率 37.5% ± 3.0%,那是引用别人的数字,不是他自己算的。**广为流传的"10% 法则"实际上可以追溯到 Pauly & Christensen (1995), *Nature* 374:255–257**,他们重新估计了 48 个已发表营养级模型的平均转换效率,得到约 10% 这个数字,后来被 Ecopath 生态系统建模软件当作默认值采纳——这是一个后来的经验汇总,不是 Lindeman 的原始主张。**Kozlovsky (1968), *Ecology* 49(1):48–60** 专门检验过 Lindeman 的"递增效率"模式,结论是它"无法被证实"能推广为一般规律。真实的转换效率跨度很大:Kent (2000,二手来源转引)给出的范围是"吃低消化率植物的动物不到 1%,到吃浮游植物的浮游动物可达 40%";海洋系统的现代估计(**Eddy et al. 2021, *Trends in Ecology & Evolution***)是营养级 1→2 约 13%(11–17%)、2→3 约 10%(7–12%)。
 
-**Serengeti 等具体系统的顶级食肉动物生物量占比**,子任务检索到的量级印象是个位数到低两位数百分比(具体数字因系统、口径不同差异很大,能拿到的最清楚的定量文献是上面两条,更细的具体百分比子任务未能给出可靠单一来源,如实标注为"量级参考,非精确数字")。
+**用"10% 转换效率"推出"捕食者生物量应为猎物的 10%"这一步,没有任何经典文献直接这样说过,是一个额外的推论**——它还额外假设两个营养级的生物量周转速度相当。这条假设在下面 §3.1.3 会被证明恰恰是本世界和真实系统之间最关键的差异之一。
 
-**个体数金字塔 vs 生物量金字塔的换算需要谨慎。** 真实系统里捕食者往往体型显著大于单个猎物个体(狮子远大于单只瞪羚幼崽,但接近成年角马),所以按个体数算的"数量金字塔"通常比按生物量算的"生物量金字塔"更陡(捕食者个体更少,因为每个捕食者需要吃掉更多只猎物才能撑起自己的体重)。**本世界的捕食者和食草者体型接近**(`size` 基因只在 [0.4, 1.6] 区间温和分化,且 `docs/trait_evolution.md` 记录的实测均值在 0.6–0.8 附近,捕食者与食草者之间没有测出系统性体型差),所以本世界的"个体数占比"理论上应该比真实系统的"个体数占比"更接近"生物量占比"——即本世界的 23% 更适合直接对照真实系统的生物量比例数字,而不是被体型差异的换算进一步压低预期。这一条是推导,没有直接文献数字支撑,标注为 **[推导,非文献直接结论]**。
+#### 3.1.1 Hatton et al. (2015) ——已用原文核实,方向和数量级都比第一版写的更明确
+
+**Hatton, I.A., McCann, K.S., Fryxell, J.M., Davies, T.J., Smerlak, M., Sinclair, A.R.E., Loreau, M. (2015), *Science* 349(6252):aac6284, "The predator-prey power law: Biomass scaling across terrestrial and aquatic biomes"**。子任务取得了原文全文,摘要原句:"We find that predator and prey biomass follow a general scaling law with exponents consistently near ¾. This pervasive pattern implies that the structure of the biomass pyramid becomes increasingly bottom-heavy at higher biomass." 具体指数(捕食者生物量 ∝ 猎物生物量^k):非洲大型哺乳动物 **k=0.73**(R²=0.92, n=46);捕食者-猎物合并数据集 **k=0.74**(95% CI 0.68–0.81, n=184,狮/鬣狗/虎/狼分别 0.77/0.74/0.74/0.72);浮游动物-藻类 **k=0.71**(n=667);25 个已发表数据集的元分析 **k 均值 0.72**(总 n=2950 个生态系统),声称"the observed predator-prey biomass ratio exhibits highly significant declines (P < 10⁻⁹)"。该文一节的标题就叫 **"Why are there not more lions?"**。具体量级:文中举例卡拉哈里(干旱)比恩戈罗恩戈罗火山口(食物富饶)每磅猎物供养的捕食者数量少约三倍;非洲系统的拟合公式是 **捕食者/猎物生物量比 = 0.094 × 猎物生物量^(−0.27)**(R²=0.62, n=46)。**该文 Fig. 8 还显示捕食者与猎物的平均体型相对群落生物量基本走平(斜率 −0.04 和 −0.02,均不显著)**,即这条递减规律是真实的密度/生物量效应,不是"系统越大动物体型跟着变"的假象。
+
+独立复现:**Perkins, D.M. et al. (2022), *Nature Communications* 13:4990** 在复杂食物网内部同样测到次线性标度,淡水/海洋/陆地系统的指数分别是 0.61/0.74/0.75,均值 0.71,与 Hatton 的结果高度一致。子任务没有找到任何正式发表的技术性反驳,但明确标注检索预算有限,这条"未找到反例"是暂定的,不是确证的。
+
+**对本世界的含义,现在可以说得比第一版更狠一点:密度/生产力越高的系统,捕食者占比应该越低,这不是一个模糊的方向性推论,是一条 P<10⁻⁹、跨 2950 个生态系统成立的强规律。**
+
+#### 3.1.2 一个具体、可核实的锚点数字:Carbone & Gittleman (2002)
+
+**Carbone, C. & Gittleman, J.L. (2002), *Science* 295(5563):2273–2276, "A common rule for the scaling of carnivore density"**——这是第一版缺失的、最有用的单一锚点。摘要原句:**"10,000 kilograms of prey supports about 90 kilograms of a given species of carnivore, irrespective of body mass."** 也就是 **0.9%**——注意这是单一食肉物种相对其主要猎物的比例,不是把整个食肉动物公会加总。这条规律基于 25 个食肉物种,跨体型 3 个数量级依然成立;网上流传的"1–2% 法则"是二手文献的四舍五入,论文本身给的是 0.9%。**用捕食压力(猎物生产力而非静态生物量)去标度时,捕食者数量/单位猎物生产力 随捕食者体型的标度指数约为 −0.75**——这个 0.75 与 Kleiber 代谢标度指数吻合并非巧合,§3.1.3 的 Jonsson (2017) 会把这两条线正式接起来。
+
+需要如实记录的软化:**Chatterjee et al. (2023), *PeerJ* 11:e15914** 把 Carbone-Gittleman 的系数(0.381,原本只用 6 个虎种群拟合)套到印度 23 个虎保护区,拟合很差(R²=0.28, P=0.25)且系统性高估密度;重新拟合给出系数 0.125(R²=0.63, P<0.001,95% CI 0.09–2.45)。**这条"普适法则"在单个物种上重新检验时,比它听起来的样子软得多**,套用时不应把 0.9% 当成钉死的常数,只能当成数量级参照。
+
+#### 3.1.3 决定性的一条:等体型意味着数量金字塔和生物量金字塔是同一件事——这条推导现在有正式理论支撑
+
+第一版把"本世界捕食者和食草者体型接近,所以个体数占比应直接对照生物量占比"标注为"[推导,非文献直接结论]"。子任务找到了把这条推导公式化的理论文献:
+
+**Brose, U., Jonsson, T., Berlow, E.L. et al. (2006), *Ecology* 87(10):2411–2417, "Consumer-resource body-size relationships in natural food webs"**(原文核实):跨 5156 组真实捕食者-猎物关系,**捕食者的几何平均体型是猎物的约 42 倍**(log₁₀ 体型比 = 1.62 ± 0.03),**80% 的捕食者比猎物个体更大**。按类群细分差异极大:无脊椎动物捕食者 log₁₀ 比 0.37–0.96;内温脊椎动物捕食者(哺乳类量级)高达 2.86–2.91;**与本世界设计最接近的类比是寄生蜂(parasitoid),log₁₀ 比只有 0.12 ± 0.03(n=215)**——是全数据集里最接近"捕食者与被捕食者等大"的类别,但寄生蜂的个体数量级策略(一个宿主对应一个或多个后代)和本世界的连续捕食机制并不是同一种关系,类比要谨慎使用。
+
+真正把这条形式化的是 **Jonsson, T. (2017), *Scientific Reports* 7:10912, "Conditions for Eltonian pyramids in Lotka-Volterra food chains"**。定义 ρ = 捕食者/猎物平均体型比,γ = 营养级转换效率,β = 代谢标度指数(≈0.75,与本世界 `metabolize`/`thirst` 里已经在用的 Kleiber 指数是同一个数):
+
+- **ρ>1 且 γ<1 就足以产生一个"正立"的数量金字塔**(捕食者个体数少于猎物)。
+- 但**正立的生物量金字塔额外要求 γ < ρ^(β−1)**。因为 β−1 ≈ −0.25 是负数,**体型比 ρ 越大,反而越难维持正立的生物量金字塔**——体型差距大可以在数量金字塔正立的同时,生物量金字塔却是倒着的(这正是 §3.1.4 那些真实倒金字塔系统的机制)。
+
+**把这个公式套到 ρ≈1(本世界)**:Jonsson 的数量金字塔条件退化为几乎纯粹的"γ<1",而且**数量金字塔和生物量金字塔在 ρ=1 时变成同一个数学对象**——这正是本文档第一版凭直觉写下、现在被形式化证实的那条推导。**换句话说,本世界的 23% 个体数占比,直接就是约 30% 的捕食者/猎物生物量占比(23:77 换算成比值约 0.30),不需要任何体型修正。**
+
+#### 3.1.4 倒金字塔的真实例外,以及为什么它们救不了 23%
+
+**McCauley, D.J., Gellner, G., Martinez, N.D. et al. (2018), *Ecology Letters* 21(3):439–454, "On the prevalence and dynamics of inverted trophic pyramids and otherwise top-heavy communities"**——现代最好的综述,把真实的倒金字塔系统归为两类机制:**内生型**(猎物周转速度极快,比如浮游植物 P/B 比可达 100–300/年,而陆生植物只有 0.5–2/年,静态存量可以倒转,即使产出没有倒转)与**外生型**(跨边界的能量/物质补贴)。经典的英吉利海峡浮游生物倒金字塔案例(Harvey 1950,子任务确认引用真实但未能取得原始数据,广为流传的具体公斤数字未经证实,不采信为精确数字)、以及珊瑚礁鱼类群落等都属于这两类机制之一。
+
+**这条例外救不了本世界的 23%**:两种机制都依赖捕食者和猎物之间存在**巨大的周转速度不对称**(猎物世代时间远短于捕食者)或者**外部补贴**。本世界的捕食者与食草者共享同一套繁殖/寿命机制(同一个 `max_age`、同一套 `reproduce` 逻辑,唯一的差异是 `diet` 这个连续基因和它带来的采食/捕食效率差),没有周转速度不对称,也没有外部补贴——真实世界里让倒金字塔成立的两条路径,在本世界都不存在。所以 23% 需要另一个解释:要么捕食本身代价过低(`carn_cost=0.10` 相对猎物提供的能量不够重),要么食草者的"再生"(草料 logistic 回复 + 繁殖)在效果上太像一个高周转资源。
+
+**综合结论,比第一版更精确、更狠**:本世界 23% 的个体数占比,在 ρ≈1 的条件下直接等价于约 30% 的捕食者/猎物生物量占比。这个数字比 Carbone & Gittleman (2002) 实测的单一食肉物种基准(0.9%)高出约 **30 倍**,比 Hatton et al. (2015) 非洲大型哺乳动物系统的拟合曲线在任何可观测猎物生物量范围内给出的预期值都高出一个数量级以上。**这不是"偏高一点",是数量级上的差异**——本世界的捕食-被捕食生态在这个意义上比文献记录过的任何真实陆生大型动物系统都"顶重"得多。
 
 ### 3.2 [本世界实测] 23% 该怎么读
 
 6 个种子 20000 步末态,`carnivore_frac`(按 `diet>0.5` 计的个体数比例)= 0.193–0.289,均值约 0.238。同期种群总数 1067–1311,均值约 1176。
 
-对照 §3.1 的两条经验规律(10% 转化效率、Hatton 的密度-占比负相关幂律),**23% 这个数字如果要被判断为"失调",方向应该是"偏高",而不是用户直觉里隐含的"感觉到处都是食草动物、所以是食草者太多/密度太挤"。** 这两个判断其实是矛盾的——如果 23% 已经算高(相对现实的个位数到低两位数百分比参照),那"食草者太多"这个感觉本身就与"捕食者占比"这个数字无关,是另一个维度的现象(总密度、可见性),不能同时用来支持"捕食者比例失调,所以要压低捕食者/提高食草者比例"这个结论。
+对照 §3.1 的证据链(Carbone & Gittleman 的 0.9% 单物种锚点、Hatton et al. 的 P<10⁻⁹ 负相关幂律、Jonsson (2017) 关于等体型下数量金字塔即生物量金字塔的形式化推导),**23% 这个数字如果要被判断为"失调",方向应该是"偏高",而且是数量级意义上的偏高,不是用户直觉里隐含的"感觉到处都是食草动物、所以是食草者太多/密度太挤"。** 这两个判断其实是矛盾的——如果本世界的捕食者占比比任何测过的真实系统都高出一个数量级,那"食草者太多"这个感觉本身就与"捕食者占比"这个数字无关,是另一个维度的现象(总密度、可见性),不能同时用来支持"捕食者比例失调,所以要压低捕食者/提高食草者比例"这个结论。
 
-**因此,`carnivore_frac`(以及它反映的"两个物种比例")本身不构成用户视觉观感的病因。** 支持"感觉满地图都是食草动物"这个直觉的更可能是下面几条,但**这几条目前都还是推断,不是实测**:
+**因此,`carnivore_frac`(以及它反映的"两个物种比例")本身不构成用户视觉观感的病因,反而是本世界一个更值得单独关注的现象——捕食相对猎物是不是"太便宜"了(`carn_cost` 太低,或者食草者的草料+繁殖再生速度在效果上太像一个高周转资源,削弱了 §3.1.4 里本该缺失的那道屏障)。** 支持"感觉满地图都是食草动物"这个视觉直觉的更可能是下面几条,但**这几条目前都还是推断,不是实测**:
 
 - **[推断,未测]** 总种群密度本身(约 1100–1400 个体/512² 世界,即约 0.0042–0.0053 个体/平方世界单位)可能确实处于一个视觉上"密集"的区间——但这需要和"人类观察者认为多少密度算拥挤"的主观阈值比较,没有客观判据。
-- **[本世界实测,间接支持]** 食草者速度(6.9–7.2 单位/步)显著高于捕食者(1.0–1.9),而食草者数量本身也是捕食者的约 2.5–4.2 倍(取决于种子,`carnivore_frac` 在 0.193–0.289 之间波动,对应食草/食肉个体数比 4.18–2.46,均值 0.238 对应约 3.2 倍)。**移动的物体在视觉上比静止的物体更容易被注意到**(这是视觉心理学的常识性事实,但没有为本项目专门核实文献,标注为常识性推断而非专门核实的 [现实]),这会放大"食草者铺天盖地"的主观印象,即使按比例它们并不"过多"。
+- **[本世界实测,间接支持]** 食草者速度(6.9–7.2 单位/步)显著高于捕食者(1.0–1.9),而食草者数量本身也是捕食者的约 2.5–4.2 倍(取决于种子,`carnivore_frac` 在 0.193–0.289 之间波动,对应食草/食肉个体数比 4.18–2.46,均值 0.238 对应约 3.2 倍)。**移动的物体在视觉上比静止的物体更容易被注意到**(这是视觉心理学的常识性事实,但没有为本项目专门核实文献,标注为常识性推断而非专门核实的 [现实]),这会放大"食草者铺天盖地"的主观印象,即使按比例它们并不"过多"——而且按 §3.1 的结论,捕食者比例事实上是偏高不是偏低。
 - **[推断,未测]** 512² 世界里固定大小的渲染点在密集区域(河道带,§1.2 显示食草者密度在此是内陆的 3–4 倍)可能确实在视觉上出现"糊成一片"的效果,这是渲染/密度的交互,不是种群比例问题。
 
 ### 3.3 可操作的判据
 
 如果将来要严肃回答"比例是否失调"这个问题,应该看的数字不是孤立的 `carnivore_frac`,而是:
 
-1. **`carnivore_frac` 相对 Hatton et al. 幂律给出的"预期占比"的偏离方向和幅度**——需要先确定本世界的"生物量"标度(用 `size` 加权的总生物量,而非个体数)对应真实系统哪个密度区间,再查幂律给出的预期占比,这是一个明确、可执行但目前没做的计算。
-2. **`carnivore_frac` 是否随总种群密度变化**——如果 Hatton 的负相关幂律在本世界也成立(捕食者占比该随密度上升而下降),这本身是一个可以用不同 `n_init`/`plant_max` 扫出来的可证伪预测,目前没有测过。
+1. **把 `carnivore_frac` 换算成生物量占比(用 `size` 加权),直接对照 Carbone & Gittleman (2002) 的 0.9% 单物种锚点和 Hatton et al. (2015) 的幂律曲线**——§3.1.4 已经做了这个换算(23%→约 30% 生物量占比,高出锚点约 30 倍),这是本文档目前最有力的一条定量结论,不需要额外实验就能得出,只需要正确的换算(已经做了)。
+2. **`carnivore_frac` 是否随总种群密度变化,方向是否与 Hatton 的负相关幂律一致**——如果本世界也遵循"密度越高、捕食者占比越低"这条规律,这本身是一个可以用不同 `n_init`/`plant_max` 扫出来的可证伪预测,目前没有测过。
 3. **不要用 `carnivore_frac` 回答"视觉拥挤感"这个问题**——这两者是不同维度,视觉拥挤感如果真的要被验证,应该做的是渲染密度/可见速度的用户研究或截图分析,而不是种群统计学。
+4. **如果要解释 23% 为什么这么高,`carn_cost` 相对猎物提供能量的比值,以及食草者种群的有效周转速度(繁殖率×存活率),是比 `carnivore_frac` 本身更该深挖的两个数字**——§3.1.4 的分析指向的是"捕食本身可能太便宜"或者"食草者种群在效果上是个高周转资源",而不是任何关于河岸驻留的机制;这是一个和本文档主线(§1/§2/§4)平行、值得单独立项的后续问题,不在这里展开。
 
 ---
 
@@ -371,7 +405,7 @@ meat_water_frac=0.3 让"守在猎物最密处"同时解决能量与饮水(§1.1)
 
 (a) 的核实密度最高——不少关键文献(Laundré et al. 2001、Bleicher 2017、Kauffman et al. 2010、Middleton et al. 2013、Zanette et al. 2011/2023、Valeix et al. 2009a、Newediuk et al. 2026 等)是子任务直接读取论文原文或摘要页确认的,细节可信;少数(Bleicher 2017 的作者名缩写与统计口径、Preisser et al. 2005 的纳入研究数、Palomares & Caro 1999 原文、某几篇"未验证线索")只能通过二手来源交叉印证,已在正文对应位置逐条标注,不作为确信数字使用。"马拉河角马渡河遭鳄鱼伏击"这个广为流传的意象,专门核查后**没有找到可核实的同行评审一手文献**,已在正文按此说明,不作为 [现实] 引用。
 
-(c) 的生物量金字塔数字总体上比 (a)/(b) 更粗——子任务能确认 Lindeman (1942) 的 10% 法则与 Hatton et al. (2015) 的次线性标度框架存在且方向正确,但具体系统(如 Serengeti)的精确占比数字未能找到单一可靠来源,已在 §3.1 如实标注为"量级参考,非精确数字"。
+(c)(生物量金字塔数字,即 §3.1)这个子任务运行时间明显长于另外两个(约 30 分钟,远超 (a)/(b) 的 5–11 分钟),但落地后核实密度反而是三者中最高的一个——它直接取得了 Elton (1927)、Lindeman (1942)、Hatton et al. (2015)、Brose et al. (2006)、Perkins et al. (2022)、Chatterjee et al. (2023) 的原文全文,纠正了本文档初稿里一个真实的引用错误(把 Pauly & Christensen 1995 重新估计出的"约 10% 转换效率"经验汇总,误归给了 Lindeman 1942 本人),并给出了 Carbone & Gittleman (2002) 这个此前完全缺失的具体锚点数字与 Jonsson (2017) 的形式化理论,让 §3.1 的结论从"量级参考,非精确数字"升级为有具体倍数(约一个数量级)的定量论证。仍未能核实的部分:Serengeti 等具体系统的精确生物量公斤数(Coe, Cumming & Phillipson 1976 的原始数值付费墙无法取得,二手转引的公斤数已在正文标注为"未核实,不采信为精确数字")、Yellowstone 麋鹿种群的常见引用数字(未能对照一手来源确认)、以及一篇可能直接相关但无法打开的 bioRxiv 预印本(数量金字塔的物种层面统计,作者信息本身在两次抓取中不一致)。这些缺口已在 §3.1 对应位置逐条标注,没有被包装成确信数字。
 
 §1(机制诊断)与 §4.2.1(消融实验)的数字全部由本次会话在这个代码库里实际运行 `scripts/run_headless.py` 与一个未提交的分析脚本得到,运行环境:`XLA_PYTHON_CLIENT_PREALLOCATE=false`,RTX 4090,6 配对种子(0–5),20000 步/种子。
 
@@ -386,8 +420,12 @@ meat_water_frac=0.3 让"守在猎物最密处"同时解决能量与饮水(§1.1)
 - Beschta, R.L. & Ripple, W.J. (2013). Comment. *Ecology* 94(6):1420–1425.
 - Bleicher, S. (2017). The landscape of fear conceptual framework: definition and review of current applications and misuses. *PeerJ* 5:e3772.(作者名缩写与统计口径:二手来源交叉印证,建议核对原文)
 - Boiseau, B.T., Trinidad, J.M., Knight, R.N., Larsen, R.T., McMillan, B.R. & Hall, L.K. (2024). Influence of moonlight on visits to water sources by mammalian predator and prey: a test of competing hypotheses. *Animal Behaviour* 210:139–152.
+- Brose, U., Jonsson, T., Berlow, E.L., Warren, P. et al. (2006). Consumer-resource body-size relationships in natural food webs. *Ecology* 87(10):2411–2417.
 - Brown, J.S., Laundré, J.W. & Gurung, M. (1999). The Ecology of Fear: Optimal Foraging, Game Theory, and Trophic Interactions. *Journal of Mammalogy* 80(2):385–399.
 - Bryce, C.M., Wilmers, C.C. & Williams, T.M. (2017). Energetics and evasion dynamics of large predators and prey: pumas vs. hounds. *PeerJ* 5:e3701.
+- Carbone, C. & Gittleman, J.L. (2002). A common rule for the scaling of carnivore density. *Science* 295(5563):2273–2276.
+- Chatterjee, S. et al. (2023). Reassessing the Carbone-Gittleman carnivore density rule against Indian tiger reserve data. *PeerJ* 11:e15914.
+- Coe, M.J., Cumming, D.H. & Phillipson, J. (1976). Biomass and production of large African herbivores in relation to rainfall and primary production. *Oecologia* 22:341–354.(原始生物量数值付费墙未取得,二手转引数字不采信为精确数字)
 - Courbin, N. et al. (2019). Zebra diel migrations reduce encounter risk with lions at night. *Journal of Animal Ecology*.
 - Crawford, D.A., Conner, L.M., Clinchy, M., Zanette, L.Y. & Cherry, M.J. (2022). Prey tells, large herbivores fear the human "super predator". *Oecologia* 198:91–98.
 - Creel, S. & Christianson, D. (2008). Relationships between direct predation and risk effects. *Trends in Ecology & Evolution* 23(4):194–201.
@@ -397,26 +435,36 @@ meat_water_frac=0.3 让"守在猎物最密处"同时解决能量与饮水(§1.1)
 - Doody, J.S. et al. (2007). Environmental Manipulation to Avoid a Unique Predator: Drinking Hole Excavation in the Agile Wallaby. *Ethology*.(二手来源交叉印证)
 - Durant, S.M. (2000). Living with the enemy: avoidance of hyenas and lions by cheetahs in the Serengeti. *Behavioral Ecology* 11(6):624–632.
 - Evans, L.J., Davies, A.B., Goossens, B. & Asner, G.P. (2017). Riparian vegetation structure and the hunting behavior of adult estuarine crocodiles. *PLoS ONE* 12(10):e0184804.
+- Eddy, T.D. et al. (2021). Energy flow through marine ecosystems: confronting transfer efficiency. *Trends in Ecology & Evolution*.
+- Elton, C. (1927). *Animal Ecology*, chapter V. (原文全文核实;"pyramid of numbers"一词的真正出处,未使用"倒金字塔"这一后来的教科书说法)
 - Fortin, D. et al. (2005). Wolves influence elk movements: behavior shapes a trophic cascade in Yellowstone National Park. *Ecology* 86(5):1320–1330.
 - Gaynor, K.M., Brown, J.S., Middleton, A.D., Power, M.E. & Brashares, J.S. (2019). Landscapes of Fear: Spatial Patterns of Risk Perception and Response. *Trends in Ecology & Evolution* 34:355–368.(全文未能取得,结论出自摘要与二手来源)
-- Hatton, I.A., McCann, K.S. et al. (2015). The predator-prey power law: Biomass scaling across terrestrial and aquatic biomes. *Science* 349(6252):1070–1073.(精确标度指数以原文为准)
+- Hatton, I.A., McCann, K.S., Fryxell, J.M., Davies, T.J., Smerlak, M., Sinclair, A.R.E. & Loreau, M. (2015). The predator-prey power law: Biomass scaling across terrestrial and aquatic biomes. *Science* 349(6252):aac6284.(原文全文核实,指数与 P 值见 §3.1.1)
+- Hechinger, R.F., Lafferty, K.D., Dobson, A.P., Brown, J.H. & Kuris, A.M. (2011). A common scaling rule for abundance, energetics, and production of parasitic and free-living species. *Science*.
 - Hopcraft, J.G.C., Sinclair, A.R.E. & Packer, C. (2005). Planning for success: Serengeti lions seek prey accessibility rather than abundance. *Journal of Animal Ecology* 74(3):559–566.
 - Huey, R.B. & Pianka, E.R. (1981). Ecological Consequences of Foraging Mode. *Ecology* 62(4):991–999.
+- Humphreys, W.F. (1979). Production and respiration in animal populations. *Journal of Animal Ecology* 48.(原文付费墙,数字经多个独立二手来源交叉印证,中等置信度)
+- Jonsson, T. (2017). Conditions for Eltonian pyramids in Lotka-Volterra food chains. *Scientific Reports* 7:10912.
 - Kauffman, M.J., Brodie, J.F. & Jules, E.S. (2010). Are wolves saving Yellowstone's aspen? A landscape-level test of a behaviorally mediated trophic cascade. *Ecology* 91(9):2742–2755.
 - Kauffman, M.J., Brodie, J.F. & Jules, E.S. (2013). Reply. *Ecology* 94(6):1425–1431.
+- Kozlovsky, D.G. (1968). A critical evaluation of the trophic level concept. I. Ecological efficiencies. *Ecology* 49(1):48–60.
 - Laundré, J.W., Hernández, L. & Altendorf, K.B. (2001). Wolves, elk, and bison: reestablishing the "landscape of fear" in Yellowstone National Park, U.S.A. *Canadian Journal of Zoology* 79(8):1401–1409.
 - Laundré, J.W., Hernández, L. & Ripple, W.J. (2010). The Landscape of Fear: Ecological Implications of Being Afraid. *The Open Ecology Journal* 3:1–7.
 - Lima, S.L. & Bednekoff, P.A. (1999). Temporal variation in danger drives antipredator behavior: the predation risk allocation hypothesis. *The American Naturalist* 153(6):649–659.
-- Lindeman, R.L. (1942). The trophic-dynamic aspect of ecology. *Ecology* 23(4):399–417.
+- Lindeman, R.L. (1942). The trophic-dynamic aspect of ecology. *Ecology* 23(4):399–417.(原文核实;实际数字见 §3.1,不是流传的"10% 法则")
 - MacNulty, D.R., Cooper, D., Procko, M. & Clark-Wolf, T.J. (2025). Flawed analysis invalidates claim of a strong Yellowstone trophic cascade after wolf reintroduction: A comment on Ripple et al. (2025). *Global Ecology and Conservation*.(付费墙,结论出自多个独立二手来源交叉印证)
 - Marshall, K.N., Hobbs, N.T. & Cooper, D.J. (2013). Stream hydrology limits recovery of riparian ecosystems after wolf reintroduction. *Proceedings of the Royal Society B* 280:20122977.
+- McCauley, D.J., Gellner, G., Martinez, N.D. et al. (2018). On the prevalence and dynamics of inverted trophic pyramids and otherwise top-heavy communities. *Ecology Letters* 21(3):439–454.
 - Mech, L.D. (2012). Is science in danger of sanctifying the wolf? *Biological Conservation* 150:143–149.(引用与大意经多方来源确认,具体论证细节未能原文核实)
 - Middleton, A.D. et al. (2013). Linking anti-predator behaviour to prey demography reveals limited risk effects of an actively hunting large carnivore. *Ecology Letters* 16(8):1023–1030.
 - Miller, J.R., Ament, J.M. & Schmitz, O.J. (2014). Fear on the move: predator hunting mode predicts variation in prey mortality and plasticity in prey spatial response. *Journal of Animal Ecology* 83(1):214–222.
+- Mills, M.G.L. & Biggs, H.C. (1993). Prey apportionment and related ecological relationships between large carnivores in Kruger National Park. In *Mammals as Predators* (Zoological Society of London symposium).
 - Moll, R.J. et al. (2017). The many faces of fear: a synthesis of the methodological variation in characterizing predation risk. *Journal of Animal Ecology* 86:749–765.
 - Newediuk, L. et al. (2026). Landscapes of fearlessness revealed through hormonal responses to putatively risky places. *Behavioral Ecology*.
 - Palomares, F. & Caro, T.M. (1999). Interspecific killing among mammalian carnivores. *The American Naturalist* 153(5):492–508.(原文未能取得,数字经多个独立二手来源交叉印证)
+- Pauly, D. & Christensen, V. (1995). Primary production required to sustain global fisheries. *Nature* 374:255–257.(广为流传的"10% 转换效率"实际出处,不是 Lindeman 1942)
 - Peacor, S.D. et al. (2022). A skewed literature: Few studies evaluate the contribution of predation-risk effects to natural field patterns. *Ecology Letters*.
+- Perkins, D.M. et al. (2022). Consistent predator-prey biomass scaling in complex food webs. *Nature Communications* 13:4990.
 - Preisser, E.L., Bolnick, D.I. & Benard, M.F. (2005). Scared to death? The effects of intimidation and consumption in predator-prey interactions. *Ecology* 86(2):501–509.(纳入研究数未能核实,不采信)
 - Preisser, E.L., Orrock, J.L. & Schmitz, O.J. (2007). Predator hunting mode and habitat domain alter nonconsumptive effects in predator–prey interactions. *Ecology* 88(11):2744–2751.
 - Ripple, W.J. & Beschta, R.L. (2004). Wolves and the ecology of fear: can predation risk structure ecosystems? *BioScience* 54(8):755–766.
@@ -429,6 +477,8 @@ meat_water_frac=0.3 让"守在猎物最密处"同时解决能量与饮水(§1.1)
 - Valeix, M. et al. (2009a). Does the risk of encountering lions influence African herbivore behaviour at waterholes? *Behavioral Ecology and Sociobiology* 63(10):1483–1494.
 - Valeix, M. et al. (2009b). Behavioral adjustments of African herbivores to predation risk by lions: spatiotemporal variations influence habitat use. *Ecology* 90(1):23–30.
 - van Beeck Calkoen, S.T.S. et al. (2026). Experimental evidence for large carnivore risk cues reducing deer browsing intensity in a temperate forest. *Journal of Applied Ecology*.(效应量未能原文核实)
+- van der Meer, J. et al. (2021). Production efficiency differences between poikilotherms and homeotherms have little to do with metabolic rate. *Ecology Letters*.(全文未能取得,仅摘要层面核实)
+- DeLong, J.P. & Vasseur, D.A. (2012). A dynamic explanation of size-density scaling in carnivores. *Ecology*.(摘要层面核实)
 - Wearmouth, V.J. et al. (2014). Scaling laws of ambush predator "waiting" behaviour are tuned to a common ecology. *Proceedings of the Royal Society B* 281:20132997.
 - Woodroffe, R. et al. (2016). An Ecological Paradox: The African Wild Dog (*Lycaon pictus*) Is Not Attracted to Water Points When Water Is Scarce in Hwange National Park, Zimbabwe. *PLoS ONE*.
 - Zanette, L.Y., White, A.F., Allen, M.C. & Clinchy, M. (2011). Perceived predation risk reduces the number of offspring songbirds produce per year. *Science* 334(6061):1398–1401.
