@@ -254,6 +254,31 @@ class Config:
     #                                    unchanged, so an ablation arm and the
     #                                    full arm remain genome-compatible and
     #                                    directly comparable.
+    los_occlusion_enabled: bool = False  # docs/three_d.md S5.1: block visibility
+    #                                    of a candidate (for prey/pred/peer)
+    #                                    when the terrain between observer and
+    #                                    candidate rises above the straight-line
+    #                                    interpolation of their two heights --
+    #                                    "a mountain blocks sight". Default OFF,
+    #                                    same convention as `trample_impact`:
+    #                                    this doesn't exist unless an ablation
+    #                                    arm explicitly turns it on. Does not
+    #                                    change `in_dim`/`genome_size` -- it is
+    #                                    a visibility judgement on the existing
+    #                                    `closeness` term, not a new channel.
+    los_samples: int = 4               # interior points sampled along the
+    #                                    observer->candidate line (excluding
+    #                                    both endpoints), evenly spaced. Only
+    #                                    read when `los_occlusion_enabled`.
+    los_margin: float = 0.1            # height a sample must exceed the
+    #                                    observer/candidate interpolation by
+    #                                    (same units as `terrain.height`, i.e.
+    #                                    a fraction of `ridge_height`) before
+    #                                    it counts as blocking -- a small
+    #                                    positive margin so a perfectly flat
+    #                                    line (interpolation error is exactly
+    #                                    0 for the analytic height field) is
+    #                                    never mistaken for occlusion.
 
     # --- plants (logistic regrowth toward carrying capacity) ---
     plant_max: float = 2.2         # carrying capacity per cell: kept moderate on
