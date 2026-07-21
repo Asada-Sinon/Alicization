@@ -71,7 +71,7 @@
       const magic = new Uint8Array(ev.data, 0, 4);
       if (magic[0] === 85 && magic[1] === 78 && magic[2] === 84 && magic[3] === 82) {
         const t = parseTerrain(ev.data);          // "UNTR"
-        Renderer.setTerrain(t.grid, t.height, t.forest, t.water);
+        Renderer.setTerrain(t.grid, t.world, t.height, t.forest, t.water);
         return;
       }
       latest = parse(ev.data);
@@ -131,6 +131,10 @@
 
   // --- click to select nearest agent ---
   canvas.addEventListener("click", (e) => {
+    // The orbit camera (render.js) uses mousedown/move/up on this same
+    // canvas for rotate/pan; a drag past its threshold sets this flag so it
+    // doesn't also register as a click-to-select.
+    if (Renderer.consumeClickSuppression()) return;
     if (!latest) return;
     const w = Renderer.worldFromClient(e.clientX, e.clientY);
     if (!w) return;
@@ -428,6 +432,7 @@
     for (let i = 0; i < latest.n; i++) {
       if ((a[i * STRIDE + 4] | 0) === selectedId) {
         const p = Renderer.canvasFromWorld(a[i * STRIDE], a[i * STRIDE + 1]);
+        if (!p) { ring.style.display = "none"; return; }  // camera-occluded, not dead
         ring.style.left = p.x + "px";
         ring.style.top = p.y + "px";
         ring.style.display = "block";
