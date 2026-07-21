@@ -109,9 +109,17 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
     genome = jax.random.normal(k_gen, (n, cfg.genome_size)) * cfg.genome_init_scale
     # Seed the diet gene *bimodally*: a herbivore cluster (sigmoid ~0.08) and a
     # carnivore cluster (sigmoid ~0.88), so two distinct types exist from step 0.
+    # `cfg.diet_bimodal_init` is a compile-time flag (Config is baked into the
+    # jit), so branching on it in plain Python is fine -- see docs/biology.md
+    # §10.1: this is one of four layers that hold the split apart, and the
+    # ablation arm needs founders to start from a single neutral cluster
+    # instead, so any bimodality later is evolved rather than seeded.
     r = jax.random.uniform(k_carn, (n,))
-    diet_gene = jnp.where(r < cfg.carnivore_init_frac, 2.0, -2.5)
-    diet_gene = diet_gene + 0.3 * genome[:, cfg.diet_index]  # a little spread
+    if cfg.diet_bimodal_init:
+        diet_center = jnp.where(r < cfg.carnivore_init_frac, 2.0, -2.5)
+    else:
+        diet_center = jnp.zeros_like(r)
+    diet_gene = diet_center + 0.3 * genome[:, cfg.diet_index]  # a little spread
     genome = genome.at[:, cfg.diet_index].set(diet_gene)
 
     hue = jax.random.uniform(k_hue, (n,))

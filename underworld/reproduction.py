@@ -84,16 +84,27 @@ def cull(state: WorldState, water_damage: jax.Array, cfg: Config):
     return state._replace(alive=state.alive & (~died)), deaths
 
 
-def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config) -> jax.Array:
+def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config,
+                       key: jax.Array) -> jax.Array:
     """For every agent, find another *wanting-to-reproduce* agent with a similar
     diet to serve as a second genetic parent -- assortative by diet so crossover
     mixes brain genes within a species rather than between herbivores and
     carnivores. Falls back to pairing an agent with itself (crossover becomes a
     no-op, i.e. the old asexual clone) when there's no one else to pair with this
     step (0 or an odd number of reproducers).
+
+    `cfg.assortative_mating=False` is the ablation arm (docs/biology.md
+    §10.1/§10.5): wanters are ranked by an independent uniform draw instead of
+    diet, so pairing is uniformly random among reproducers rather than
+    diet-sorted. Dieckmann & Doebeli (1999) is why this one is tested
+    separately from the other three diet-speciation switches -- theory says
+    assortative mating *maintains* an evolved branch rather than merely seeding
+    one, so it should be ablated only after checking whether a branch forms at
+    all without the other three.
     """
     n = cfg.n_max
-    order = jnp.argsort(jnp.where(want, diet, jnp.inf))  # wanters first, by diet
+    rank_key = diet if cfg.assortative_mating else jax.random.uniform(key, (n,))
+    order = jnp.argsort(jnp.where(want, rank_key, jnp.inf))  # wanters first
     n_want = jnp.sum(want)
     swap = jnp.arange(n) ^ 1                              # pairs (0,1) (2,3) ...
     swap = jnp.where(swap < n_want, swap, jnp.arange(n))  # odd one out -> self
@@ -114,10 +125,10 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
     parent_idx = jnp.argsort(~want)              # wanters first (stable)
     slot_idx = jnp.argsort(~free)                # free slots first (stable)
 
-    k_gen, k_cross, k_pos, k_head, k_hue = jax.random.split(key, 5)
+    k_gen, k_cross, k_pos, k_head, k_hue, k_mate = jax.random.split(key, 6)
 
     # --- build child values for every k (only the is_birth ones are used) ---
-    mate_idx = _assortative_mate(want, state.diet, cfg)[parent_idx]
+    mate_idx = _assortative_mate(want, state.diet, cfg, k_mate)[parent_idx]
     crossed = crossover(state.genome[parent_idx], state.genome[mate_idx], k_cross, cfg)
     child_genome = mutate(crossed, k_gen, cfg)
     # How much to hand over is the parent's own gene, not a global constant.
