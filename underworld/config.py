@@ -364,6 +364,35 @@ class Config:
     #                                    the herb layer they walk on, not
     #                                    damage to the canopy fruit hangs from
     #                                    overhead.
+    #                                    docs/biology.md SS11.1: measured to be
+    #                                    a *negative* feedback (agents cluster
+    #                                    -> capacity erodes -> they leave ->
+    #                                    trample's own Moran's I falls). Kept
+    #                                    for reproducibility of that published
+    #                                    null result; do not delete.
+    trample_path_gain: float = 0.0    # fraction of `forest_slow`'s canopy speed
+    #                                    penalty cancelled at maximum trample
+    #                                    (1.0). This is the sign-corrected
+    #                                    Stage 0 mechanism from docs/biology.md
+    #                                    SS11.1: real game trails are a
+    #                                    *positive* feedback -- repeated
+    #                                    passage compacts ground and clears
+    #                                    undergrowth, making the same route
+    #                                    cheaper to cross again, not scarcer of
+    #                                    food. Applied to `forest_slow` (a
+    #                                    movement cost) rather than
+    #                                    `trample_impact` (a food-capacity
+    #                                    cost) so the two mechanisms stay
+    #                                    disentangled -- one records a
+    #                                    published negative result, this one
+    #                                    tests the corrected hypothesis. Only
+    #                                    has anything to cancel where
+    #                                    `forest_slow * terrain.forest` > 0,
+    #                                    i.e. paths can only be measured
+    #                                    forming through canopy, not open
+    #                                    ground -- see `dynamics.act`. Default
+    #                                    OFF, same convention as
+    #                                    `trample_impact`.
 
     # --- rng ---
     seed: int = 0

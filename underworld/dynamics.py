@@ -19,12 +19,23 @@ def act(state: WorldState, outputs: jax.Array, terrain, cfg: Config):
 
     Dense canopy slows movement: forest is food-rich but hard to cross, so it's a
     genuine trade-off rather than a free bonus.
+
+    Recent foot traffic (`state.trample`, from the *end* of the previous step --
+    see `step.py`) cancels part of that canopy penalty: a cell repeatedly walked
+    has its undergrowth worn down, so the same route gets cheaper to cross again.
+    This is the sign-corrected Stage 0 niche-construction mechanism (see
+    `trample_path_gain` in config.py and docs/biology.md SS11.1) -- the earlier
+    version eroded food capacity instead, which measurably turned out to be a
+    *dispersing* negative feedback, not a path-forming one. `trample_path_gain`
+    defaults to 0.0, making `path_relief` identically zero and this identical to
+    the pre-existing behaviour.
     """
     turn = outputs[:, 0] * cfg.max_turn                 # [-max_turn, max_turn]
     thrust = 0.5 * (outputs[:, 1] + 1.0)                # [0, 1]
 
     cell = pos_to_cell(state.pos, cfg)
-    slow = 1.0 - cfg.forest_slow * terrain.forest[cell]
+    path_relief = jnp.clip(cfg.trample_path_gain * state.trample[cell], 0.0, 1.0)
+    slow = 1.0 - cfg.forest_slow * terrain.forest[cell] * (1.0 - path_relief)
 
     heading = jnp.mod(state.heading + turn * cfg.dt, 2.0 * jnp.pi)
     speed = thrust * cfg.max_speed * slow
