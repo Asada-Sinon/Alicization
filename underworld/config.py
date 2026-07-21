@@ -271,6 +271,42 @@ class Config:
     #                                   memory_decay does the forgetting; do not
     #                                   crank this up to compensate
 
+    # --- niche construction: passive trampling (Stage 0 of docs/TODO.md
+    # priority 3 -- a zero-genome-cost side effect of moving, not a brain
+    # output). Agents deposit onto a [n_cells] field just like the existing
+    # `demand_per_cell` scatter-add in `dynamics.graze`; the field then erodes
+    # `ecology.regrow`'s plant carrying capacity, closing a real feedback loop
+    # a population can walk itself into (or, if it disperses, out of).
+    trample_decay: float = 0.99       # per-step decay of "recent foot traffic".
+    #                                    Half-life ~69 steps: slower than
+    #                                    regrow_rate=0.06 (~17-step timescale)
+    #                                    so it reflects recent presence rather
+    #                                    than instantaneous occupancy, but far
+    #                                    short of the static terrain -- this is
+    #                                    not permanent land-forming.
+    trample_rate: float = 0.01        # deposit per agent occupying a cell, per
+    #                                    step, before decay. Set equal to
+    #                                    (1 - trample_decay) so a single
+    #                                    continuously-occupied cell asymptotes
+    #                                    to exactly the field's own cap of 1.0
+    #                                    (geometric series rate/(1-decay) = 1);
+    #                                    a crowd of agents saturates faster,
+    #                                    a single pass-through leaves a small
+    #                                    transient bump that decays away.
+    trample_impact: float = 0.0       # fraction of plant carrying capacity
+    #                                    eroded at maximum trample (1.0).
+    #                                    Default OFF -- unlike fruit_max's
+    #                                    "0 disables" convention, this
+    #                                    mechanism doesn't exist unless an
+    #                                    ablation arm explicitly turns it on
+    #                                    with --set trample_impact=... .
+    #                                    Applies to `plant` (grass/ground
+    #                                    cover) only, not `fruit`: piosphere
+    #                                    erosion is agents' feet wearing down
+    #                                    the herb layer they walk on, not
+    #                                    damage to the canopy fruit hangs from
+    #                                    overhead.
+
     # --- rng ---
     seed: int = 0
 

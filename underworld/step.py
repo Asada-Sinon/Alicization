@@ -14,7 +14,7 @@ from . import (brain, dynamics, ecology, memory, metrics, reproduction, sensors,
                spatial)
 from . import terrain as terrain_mod
 from .config import Config
-from .state import WorldState, diet_of, init_state
+from .state import WorldState, diet_of, init_state, pos_to_cell
 
 
 def build_step(cfg: Config, terrain):
@@ -77,9 +77,29 @@ def build_step(cfg: Config, terrain):
         state, deaths = reproduction.cull(state, water_damage, cfg)
         state = reproduction.reproduce(state, key, cfg)
 
-        # 7. plants regrow; refresh the cached diet for the whole population
+        # 7a. passive trampling: a niche-construction feedback with zero genome
+        # cost (docs/TODO.md priority 3, Stage 0). Reuses the same per-cell
+        # scatter-add idiom as `dynamics.graze`'s `demand_per_cell` -- agents
+        # deposit onto a [n_cells] field just by standing there, no brain
+        # output involved. Computed on the post-movement, post-birth/death
+        # population, same cell grid `ecology.regrow` operates on below.
+        cell = pos_to_cell(state.pos, cfg)
+        occupancy = jnp.zeros(cfg.n_cells).at[cell].add(state.alive.astype(jnp.float32))
+        trample = jnp.clip(
+            state.trample * cfg.trample_decay + occupancy * cfg.trample_rate,
+            0.0, 1.0)
+        # Erodes the *grass* carrying capacity only -- feet wear down the herb
+        # layer they walk on, not canopy fruit hanging overhead. Default
+        # trample_impact=0.0 makes this identically `terrain.capacity`, so the
+        # trample field's own dynamics have no effect on the rest of the sim
+        # unless an ablation arm turns it on.
+        effective_capacity = jnp.clip(
+            terrain.capacity * (1.0 - trample * cfg.trample_impact), 0.0, None)
+
+        # 7b. plants regrow; refresh the cached diet for the whole population
         state = state._replace(
-            plant=ecology.regrow(state.plant, terrain.capacity, cfg.regrow_rate,
+            trample=trample,
+            plant=ecology.regrow(state.plant, effective_capacity, cfg.regrow_rate,
                                  cfg.regrow_baseline, cfg.plant_max),
             fruit=ecology.regrow(state.fruit, terrain.fruit_capacity,
                                  cfg.fruit_regrow_rate, cfg.fruit_regrow_baseline,
