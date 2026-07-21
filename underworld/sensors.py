@@ -1,16 +1,26 @@
 """Directional retina vision (M1). Each agent sees the world in `retina_sectors`
-angular wedges around its own heading. Per sector it gets five channels:
+angular wedges around its own heading. Per sector it gets six channels:
 
     food      -- plant energy sampled a short way ahead in that direction
     prey      -- nearest more-herbivorous neighbour (something it could eat)
     predator  -- nearest more-carnivorous neighbour (something that could eat it)
     water     -- proximity of a river or the sea, sampled a short way ahead
     slope     -- elevation *relative to the agent's own*, sampled ahead
+    peer      -- nearest neighbour of *similar* diet, regardless of who could
+                 eat whom
 
 plus its own energy, diet, and water level. Prey/predator are *relative* to the
 viewer's own diet, so one brain reads the same retina whether it's grazer or
 hunter. Slope is likewise relative rather than absolute height: what an agent can
 act on is "is it uphill that way", which is exactly what it pays climb_cost for.
+
+Prey/predator are diet-*difference* signals, so for two agents at nearly the
+same diet both are ~0 -- conspecifics of similar diet are mutually invisible.
+That silently blocked every form of social behaviour (following, group cohesion,
+juveniles learning water locations from adults) because the input layer simply
+carried no signal to learn from, no matter how the brain evolved. `peer` is
+diet-*similarity*, the complementary construction, so it is maximal exactly
+where prey/pred both vanish.
 
 Under dense canopy the effective vision radius shrinks (`forest_occlusion`) while
 `attack_range` does not -- short sight with unchanged reach is what makes forest
@@ -54,14 +64,22 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     closeness = jnp.clip(1.0 - dist / vision[:, None], 0.0, 1.0) * valid
     prey_val = closeness * jnp.maximum(di - diet_j, 0.0)       # j more herbivorous
     pred_val = closeness * jnp.maximum(diet_j - di, 0.0)       # j more carnivorous
+    # Similarity rather than difference: 1.0 at diet_j == di, falling off to 0
+    # at the maximum possible gap (diet is a sigmoid output, so that gap is 1.0).
+    # This is what prey_val/pred_val cannot express by construction -- they are
+    # built from a signed difference, so they are both exactly zero at the same
+    # point where this is at its peak.
+    peer_val = closeness * (1.0 - jnp.abs(di - diet_j))
 
-    prey_cols, pred_cols = [], []
+    prey_cols, pred_cols, peer_cols = [], [], []
     for s in range(R):
         m = sector == s
         prey_cols.append(jnp.max(jnp.where(m, prey_val, 0.0), axis=1))
         pred_cols.append(jnp.max(jnp.where(m, pred_val, 0.0), axis=1))
+        peer_cols.append(jnp.max(jnp.where(m, peer_val, 0.0), axis=1))
     prey = jnp.stack(prey_cols, axis=1)                        # [n, R]
     pred = jnp.stack(pred_cols, axis=1)                        # [n, R]
+    peer = jnp.stack(peer_cols, axis=1)                        # [n, R]
 
     # --- field channels: sample a point ahead in each sector direction ---
     ang = state.heading[:, None] + (jnp.arange(R)[None, :] + 0.5) * width  # [n, R]
@@ -88,8 +106,12 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     own_water = jnp.tanh(state.water / cfg.water_scale)[:, None]
     # Memory goes on the *end* of the vector: `server/app.py:_build_detail`
     # slices the retina channels by leading offset, and appending keeps those
-    # slices valid.
+    # slices valid. `peer` is appended after memory for the same reason --
+    # it was added later than the original five retina channels, and putting
+    # it here rather than interleaved keeps every existing `li[a*r:b*r]` slice
+    # in `server/app.py` correct without renumbering.
     mem = memory.encode(state.memory, state.heading, cfg)        # [n, 4*slots]
     return jnp.concatenate(
-        [food, prey, pred, water_ch, slope, energy, di, own_water, mem], axis=1
-    )                                                    # [n, 5R+3+4*slots]
+        [food, prey, pred, water_ch, slope, energy, di, own_water, mem, peer],
+        axis=1,
+    )                                                    # [n, 5R+3+4*slots+R]

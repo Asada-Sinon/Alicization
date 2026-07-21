@@ -14,7 +14,7 @@ from . import (brain, dynamics, ecology, memory, metrics, reproduction, sensors,
                spatial)
 from . import terrain as terrain_mod
 from .config import Config
-from .state import WorldState, diet_of, init_state
+from .state import WorldState, diet_of, init_state, size_of
 
 
 def build_step(cfg: Config, terrain):
@@ -42,13 +42,18 @@ def build_step(cfg: Config, terrain):
             memory=memory.advance(state.memory, state.vel * cfg.dt, k_drift, cfg))
 
         # 4. graze/drink, then hunt (neighbours re-indexed after moving), then metabolism
+        # `size` is read from the genome fresh here rather than cached on state
+        # (see `state.size_of`): it's a per-agent scalar, never broadcast across
+        # the neighbour axis the way `diet` is, so recomputing it once per step
+        # is cheap and keeps it out of the `lax.scan` carry.
+        size = size_of(state.genome, cfg)
         energy, plant, food_gain, forage_water = dynamics.graze(state, cfg)
         state = state._replace(energy=energy, plant=plant)
         energy, fruit, fruit_gain, fruit_water = dynamics.eat_fruit(state, cfg)
-        water, drink_gain = dynamics.drink(state, terrain, cfg)
+        water, drink_gain = dynamics.drink(state, terrain, cfg, size)
         # Forage water lands inside the same cap as drinking, so eating can
         # top a tank up but never overfill one past what a river would.
-        water = jnp.minimum(water + forage_water + fruit_water, cfg.water_max)
+        water = jnp.minimum(water + forage_water + fruit_water, cfg.water_max * size)
         state = state._replace(energy=energy, water=water, fruit=fruit)
 
         # 4b. remember where that came from. Writes are triggered by the eating
@@ -65,8 +70,8 @@ def build_step(cfg: Config, terrain):
         energy, meat_gain, damage, water, meat_water_gain, water_damage = \
             dynamics.predation(state, nbr2, dist2, valid2, cfg)
         energy = dynamics.metabolize(
-            energy, thrust, state.diet, climb, state.alive, cfg)
-        water = dynamics.thirst(water, thrust, state.alive, cfg)
+            energy, thrust, state.diet, climb, state.alive, cfg, size)
+        water = dynamics.thirst(water, thrust, state.alive, cfg, size)
         state = state._replace(
             energy=energy, water=water, age=state.age + state.alive,
             last_food=food_gain + fruit_gain, last_meat=meat_gain, last_damage=damage,

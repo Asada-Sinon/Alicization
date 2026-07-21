@@ -26,6 +26,7 @@ def mutate(genome: jax.Array, key: jax.Array, cfg: Config) -> jax.Array:
     sigma = jnp.full((cfg.genome_size,), cfg.mutation_sigma)
     sigma = sigma.at[cfg.diet_index].set(cfg.diet_mutation_sigma)
     sigma = sigma.at[cfg.invest_index].set(cfg.invest_mutation_sigma)
+    sigma = sigma.at[cfg.size_index].set(cfg.size_mutation_sigma)
     return genome + jax.random.normal(key, genome.shape) * sigma
 
 
@@ -37,6 +38,8 @@ def crossover(genome_a: jax.Array, genome_b: jax.Array, key: jax.Array,
     parents' brains never blends their heritable diet type back toward the
     omnivore middle.
 
+    **Size is also exempt**, for the second of the two reasons given below.
+
     The investment gene deliberately does *not* get that protection, and the
     reasoning is worth recording because the opposite is tempting. Exempting a
     gene makes it non-recombining, so it stays linked to every other exempt gene
@@ -45,9 +48,16 @@ def crossover(genome_a: jax.Array, genome_b: jax.Array, key: jax.Array,
     exists to detect whether carnivores really do provision differently. The two
     reasons to exempt a gene are that it defines a discrete type worth keeping
     distinct (diet) or that the brain is adapted to it and an intermediate value
-    would mismatch (a future body-size or speed gene). Investment is neither: it
-    is read once at birth and never enters the sensorimotor loop at all.
+    would mismatch (this is that future body-size gene: `dynamics.act` and
+    everything sensory is unaffected by `size` today, but the moment a future
+    change makes speed or sensor reach depend on it, a body from a crossover
+    step that mismatches either parent's control policy is exactly the
+    co-evolution failure mode this exemption exists to avoid -- cheaper to
+    exempt now than to migrate every evolved genome later). Investment is
+    neither: it is read once at birth and never enters the sensorimotor loop at
+    all.
     """
     take_b = jax.random.bernoulli(key, 0.5, genome_a.shape)
     take_b = take_b.at[:, cfg.diet_index].set(False)
+    take_b = take_b.at[:, cfg.size_index].set(False)
     return jnp.where(take_b, genome_b, genome_a)

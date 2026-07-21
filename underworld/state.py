@@ -60,6 +60,18 @@ def invest_of(genome: jax.Array, cfg: Config) -> jax.Array:
     return cfg.invest_min + cfg.invest_span * jax.nn.sigmoid(genome[:, cfg.invest_index])
 
 
+def size_of(genome: jax.Array, cfg: Config) -> jax.Array:
+    """Map the size gene to [size_min, size_min+size_span]; 1.0 at gene=0.
+
+    Like `invest_of`, not cached on `WorldState`: it is only ever read as a
+    per-agent scalar in `dynamics.drink/metabolize/thirst` (never broadcast
+    across the neighbour axis the way `diet` is in sensing/predation), so
+    recomputing it from the genome each time it's needed is cheap and avoids
+    growing the `lax.scan` carry.
+    """
+    return cfg.size_min + cfg.size_span * jax.nn.sigmoid(genome[:, cfg.size_index])
+
+
 def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
     k_pos, k_head, k_gen, k_hue, k_plant, k_carn, k_rej = jax.random.split(key, 7)
     n = cfg.n_max

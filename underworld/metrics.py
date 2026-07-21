@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import WorldState, invest_of, pos_to_cell
+from .state import WorldState, invest_of, pos_to_cell, size_of
 
 
 class Metrics(NamedTuple):
@@ -54,6 +54,11 @@ class Metrics(NamedTuple):
     deathage_starvation: jax.Array
     deathage_thirst: jax.Array
     deathage_senescence: jax.Array
+    # Body-size gene (docs/biology.md S8.2's water-economy design). The mean is
+    # the whole falsifiable prediction: does selection actually move it, or does
+    # it just sit at the neutral 1.0 starting point?
+    mean_size: jax.Array
+    size_std: jax.Array
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -83,6 +88,10 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
     # slots equally; `denom` is already the living count.
     invest = invest_of(state.genome, cfg)
     mean_invest = jnp.sum(invest * alive) / denom
+
+    size = size_of(state.genome, cfg)
+    mean_size = jnp.sum(size * alive) / denom
+    size_var = jnp.sum(((size - mean_size) ** 2) * alive) / denom
     d_inv = (invest - mean_invest) * alive
     d_diet = (state.diet - mean_diet) * alive
     invest_var = jnp.sum(d_inv * d_inv) / denom
@@ -118,4 +127,6 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         deathage_starvation=deaths.age_starvation.astype(jnp.float32),
         deathage_thirst=deaths.age_thirst.astype(jnp.float32),
         deathage_senescence=deaths.age_senescence.astype(jnp.float32),
+        mean_size=mean_size,
+        size_std=jnp.sqrt(size_var),
     )

@@ -17,7 +17,7 @@ from underworld import Config, new_world
 from underworld import dynamics, memory, reproduction
 from underworld import genome as genome_mod
 from underworld import terrain as terrain_mod
-from underworld.state import init_state, invest_of
+from underworld.state import init_state, invest_of, size_of
 
 
 # Small, fast config for tests.
@@ -227,6 +227,124 @@ def test_investment_gene_is_bounded_and_heritable():
     assert 0.2 < float((inv == 3.0).mean()) < 0.8, "recombination looks biased"
     # ...and brain genes mix too, or crossover is doing nothing at all.
     assert 0.0 < float(np.mean(mixed[:, :cfg.brain_params])) < 1.0
+
+
+def test_size_gene_is_bounded_and_exempt_from_crossover():
+    """The size gene stays inside [size_min, size_min+span] however extreme the
+    underlying value, and (like diet, unlike investment) never recombines --
+    the brain is not adapted to size differences yet, but the exemption is
+    already in place for the day something is (see genome.crossover)."""
+    cfg = tiny_cfg()
+    wild = jnp.linspace(-50.0, 50.0, cfg.n_max)
+    genome = jnp.zeros((cfg.n_max, cfg.genome_size)).at[:, cfg.size_index].set(wild)
+    size = np.asarray(size_of(genome, cfg))
+    assert size.min() >= cfg.size_min - 1e-6
+    assert size.max() <= cfg.size_min + cfg.size_span + 1e-6
+    # A gene of 0 must sigmoid to the old, unscaled behaviour (size == 1.0),
+    # or a fresh population would start already off-baseline.
+    neutral = float(size_of(jnp.zeros((1, cfg.genome_size)), cfg)[0])
+    assert neutral == pytest.approx(1.0, abs=1e-4)
+
+    a = jnp.zeros((cfg.n_max, cfg.genome_size)).at[:, cfg.size_index].set(-3.0)
+    b = jnp.ones((cfg.n_max, cfg.genome_size)).at[:, cfg.size_index].set(3.0)
+    mixed = np.asarray(genome_mod.crossover(a, b, jax.random.PRNGKey(0), cfg))
+    assert np.all(mixed[:, cfg.size_index] == -3.0), "size must come from parent A"
+    assert np.all(mixed[:, cfg.diet_index] == 0.0), "diet must still come from parent A"
+
+
+def test_size_gene_scales_metabolism_and_water_capacity():
+    """Bigger bodies cost more per step (Kleiber, ^0.75) but hold more water
+    (a volume, ^1.0) -- these are two different exponents and must not collapse
+    to the same scaling, or the whole water-economy design in
+    docs/biology.md S8.2 is measuring nothing."""
+    cfg = tiny_cfg()
+    alive = jnp.array([True, True])
+    thrust = jnp.array([0.5, 0.5])
+    diet = jnp.array([0.0, 0.0])
+    climb = jnp.array([0.0, 0.0])
+    small, big = 0.5, 1.5
+
+    e_small = dynamics.metabolize(
+        jnp.array([10.0, 10.0]), thrust, diet, climb, alive, cfg,
+        jnp.array([small, small]))[0]
+    e_big = dynamics.metabolize(
+        jnp.array([10.0, 10.0]), thrust, diet, climb, alive, cfg,
+        jnp.array([big, big]))[0]
+    cost_small = 10.0 - float(e_small)
+    cost_big = 10.0 - float(e_big)
+    assert cost_big > cost_small, "a bigger body must cost more to run"
+    ratio = cost_big / cost_small
+    assert ratio == pytest.approx((big / small) ** 0.75, rel=0.05)
+
+    w_small = dynamics.thirst(jnp.array([10.0, 10.0]), thrust, alive, cfg,
+                               jnp.array([small, small]))[0]
+    w_big = dynamics.thirst(jnp.array([10.0, 10.0]), thrust, alive, cfg,
+                             jnp.array([big, big]))[0]
+    wcost_small = 10.0 - float(w_small)
+    wcost_big = 10.0 - float(w_big)
+    assert wcost_big / wcost_small == pytest.approx((big / small) ** 0.75, rel=0.05)
+
+    # water_max scales isometrically (^1.0), a different exponent from the
+    # ^0.75 cost above -- collapsing the two would mean size buys nothing.
+    state, key, step_fn, _scan_fn, terrain = new_world(cfg)
+    st = state._replace(
+        water=jnp.full((cfg.n_max,), 100.0),  # already over any plausible cap
+        alive=jnp.ones((cfg.n_max,), dtype=bool),
+    )
+    size = jnp.full((cfg.n_max,), big)
+    capped, _ = dynamics.drink(st, terrain, cfg, size)
+    assert float(jnp.max(capped)) == pytest.approx(cfg.water_max * big, rel=1e-4)
+
+
+def test_child_water_investment_clamped_to_own_tank():
+    """A large parent's absolute water transfer must not exceed what a
+    small-size child's own tank (`water_max * size`) can hold -- otherwise the
+    excess is silently lost the moment `drink`'s cap is next applied, which
+    would make `invest_frac` lie about how much the child actually received."""
+    cfg = tiny_cfg(n_max=64, n_init=8)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+
+    # One breeder: huge investment fraction, and a genome that will mutate the
+    # child toward a small size (we can't force the child's exact genome since
+    # mutation is stochastic, but we CAN force the parent's water high enough
+    # that even a size-1.0 child's cap would be exceeded without clamping).
+    genome = state.genome.at[0, cfg.invest_index].set(4.0)     # near invest_max
+    genome = genome.at[0, cfg.size_index].set(0.0)             # parent size 1.0
+    alive = jnp.arange(cfg.n_max) < 1
+    energy = jnp.where(alive, cfg.repro_threshold + 5.0, 0.5)
+    water = jnp.where(alive, cfg.water_max * 5.0, 0.1)  # far more than any child's cap
+    state = state._replace(alive=alive, genome=genome, energy=energy, water=water)
+
+    child = reproduction.reproduce(state, jax.random.PRNGKey(1), cfg)
+    born = np.asarray(child.alive & ~state.alive)
+    assert born.sum() == 1
+    i = int(np.flatnonzero(born)[0])
+    child_size = float(size_of(child.genome[i:i + 1], cfg)[0])
+    assert float(child.water[i]) <= cfg.water_max * child_size + 1e-4
+
+
+def test_peer_channel_reveals_similar_diet_neighbours():
+    """`prey`/`pred` are diet-*difference* channels and are both exactly zero
+    for two agents of near-identical diet -- conspecifics were mutually
+    invisible. `peer` is the diet-*similarity* channel added to fix that; it
+    must be near its maximum exactly where prey/pred vanish."""
+    cfg = tiny_cfg(n_max=8, n_init=2, vision_radius=40.0)
+    state, key, step_fn, _scan_fn, terrain = new_world(cfg)
+    # Two same-diet agents standing on top of each other.
+    pos = state.pos.at[0].set(jnp.array([cfg.world_size / 2, cfg.world_size / 2]))
+    pos = pos.at[1].set(jnp.array([cfg.world_size / 2, cfg.world_size / 2]))
+    state = state._replace(pos=pos, diet=jnp.full((cfg.n_max,), 0.5))
+    state, _ms = step_fn(state, key)
+
+    r = cfg.retina_sectors
+    peer_off = 5 * r + 3 + 4 * cfg.memory_slots
+    li = np.asarray(state.last_input[0])
+    assert float(np.max(li[r:2 * r])) < 1e-3, "prey channel should be ~0 for same diet"
+    assert float(np.max(li[2 * r:3 * r])) < 1e-3, "pred channel should be ~0 for same diet"
+    assert float(np.max(li[peer_off:peer_off + r])) > 0.5, \
+        "peer channel should fire strongly for an adjacent same-diet neighbour"
 
 
 def test_memory_is_not_heritable():

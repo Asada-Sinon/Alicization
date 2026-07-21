@@ -102,7 +102,7 @@ def eat_fruit(state: WorldState, cfg: Config):
     return energy, fruit, gain, taken * cfg.forage_water_frac
 
 
-def drink(state: WorldState, terrain, cfg: Config):
+def drink(state: WorldState, terrain, cfg: Config, size: jax.Array):
     """Hydration: standing in a river or at the sea refills water, uncapped by any
     shared demand pool (flowing water isn't meaningfully depleted at this scale,
     only spatially constrained). Returns (water, drink_gain).
@@ -110,11 +110,15 @@ def drink(state: WorldState, terrain, cfg: Config):
     This is now a lookup into the precomputed `water_dist` field rather than the
     old analytic sine -- cheaper per step, and it works for the traced rivers and
     the sea alike.
+
+    `water_max` scales with `size` at exponent 1.0 -- water storage is a volume,
+    so it scales isometrically with body size, unlike the sub-linear metabolic
+    scaling in `metabolize`/`thirst` below.
     """
     cell = pos_to_cell(state.pos, cfg)
     in_water = terrain.water_dist[cell] < cfg.river_half_width
     gain = jnp.where(in_water, cfg.drink_rate, 0.0) * state.alive
-    water = jnp.minimum(state.water + gain, cfg.water_max)
+    water = jnp.minimum(state.water + gain, cfg.water_max * size)
     return water, gain
 
 
@@ -170,22 +174,37 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
 
 
 def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
-               climb: jax.Array, alive: jax.Array, cfg: Config) -> jax.Array:
+               climb: jax.Array, alive: jax.Array, cfg: Config,
+               size: jax.Array) -> jax.Array:
     """Charge the per-step energy cost of existing, moving, climbing, and (for
     carnivores) hunting. The diet-scaled term makes pure carnivory unsustainable
     when prey is scarce -- the feedback that keeps herbivores and carnivores
     coexisting. The climb term is work against gravity, proportional to elevation
     gained, which is what makes the range a soft barrier rather than a wall.
+
+    The base/move/hunt cost scales with `size` at Kleiber's exponent (0.75):
+    metabolic rate is sub-linear in body mass. `size` deliberately does not
+    touch `eat_rate`/`fruit_eat_rate` (intake) or `attack_range`/`diet_delta`
+    (predation) -- if intake also scaled up, size would run away to its upper
+    bound with no countervailing cost. Climb cost is left unscaled: it is not
+    part of this design's claim and there is no measurement backing an exponent
+    for it yet.
     """
-    cost = (cfg.base_cost + cfg.move_cost * thrust + cfg.carn_cost * diet) * alive
+    cost = (cfg.base_cost + cfg.move_cost * thrust + cfg.carn_cost * diet)
+    cost = cost * (size ** 0.75) * alive
     return energy - cost - cfg.climb_cost * climb
 
 
 def thirst(water: jax.Array, thrust: jax.Array, alive: jax.Array,
-           cfg: Config) -> jax.Array:
+           cfg: Config, size: jax.Array) -> jax.Array:
     """Charge the per-step water cost of existing and moving (panting/sweating).
     Symmetric across diet -- both herbivores and carnivores need to visit the
     stream; carnivores get a bonus top-up from every successful kill instead.
+
+    Scales with `size` at 0.75, the same Kleiber exponent as `metabolize` --
+    water loss, like energy loss, is metabolic/surface-area driven rather than a
+    simple volume effect (that's `water_max` in `drink`, which scales at 1.0).
     """
-    cost = (cfg.base_water_cost + cfg.move_water_cost * thrust) * alive
+    cost = (cfg.base_water_cost + cfg.move_water_cost * thrust)
+    cost = cost * (size ** 0.75) * alive
     return water - cost

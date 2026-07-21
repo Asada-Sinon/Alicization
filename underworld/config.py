@@ -44,12 +44,15 @@ class Config:
     # --- brain (fixed-topology recurrent net; weights live in the genome) ---
     # inputs: per retina sector [food, prey, predator, water, slope]
     #       + [own_energy, own_diet, own_water]
-    #       + per memory slot [sin bearing, cos bearing, distance, confidence].
+    #       + per memory slot [sin bearing, cos bearing, distance, confidence]
+    #       + per retina sector [peer] (diet similarity, appended after
+    #         memory -- see sensors.sense).
     # See the `in_dim` property for the authoritative count.
     retina_sectors: int = 8        # directional vision resolution
     hidden: int = 16               # recurrent hidden units (the fluctlight's memory)
     out_dim: int = 2               # [turn, thrust]
-    trait_dim: int = 2             # non-brain genes; [0] = diet, [1] = investment
+    trait_dim: int = 3             # non-brain genes; [0] = diet, [1] = investment,
+    #                                 [2] = size
     genome_init_scale: float = 0.4
     food_sample_dist: float = 9.0  # how far ahead each sector samples the plant field
 
@@ -180,6 +183,21 @@ class Config:
     #                                `repro_cost_frac` -- so a fresh population
     #                                starts at the previous behaviour and drifts
     #                                from there, which keeps the baseline clean.
+    # Body size: NOT the gape-limited predation refuge that was originally
+    # proposed (see docs/biology.md S8.2 -- juveniles die of thirst at a mean
+    # age of 52.5 steps, long before predation risk at 170.7 steps applies, so
+    # that premise is dead). Coupled here only to the water economy: bigger
+    # storage (size^1.0, a volume) vs bigger metabolic/water loss (size^0.75,
+    # Kleiber), giving desiccation tolerance ~ size^0.25 -- a real but very flat
+    # lever (doubling requires a 16x size increase). Deliberately NOT coupled to
+    # intake (eat_rate/drink_rate) or predation (attack_range/diet_delta): if
+    # intake also scaled up, size would run away to size_max with no
+    # countervailing cost, which would be an unfalsifiable "gene saturation"
+    # result rather than a real trade-off between metabolic cost and thirst
+    # tolerance.
+    size_min: float = 0.4          # floor; a gene of 0 sigmoids to 0.5 -> size=1.0,
+    size_span: float = 1.2         #   so a fresh population starts at the old
+    #                                 unscaled behaviour, range [0.4, 1.6]
     max_age: float = 3000.0        # steps before old age
     spawn_radius: float = 3.0      # child placed within this radius of parent
 
@@ -194,6 +212,11 @@ class Config:
     #                                      the same 0.3x ratio on `diet` is what
     #                                      keeps the herbivore/carnivore split
     #                                      from blurring.
+    size_mutation_sigma: float = 0.02  # same rate as investment -- the brain is
+    #                                    adapted to a body's speed/reach, which
+    #                                    do not depend on `size` here, but a
+    #                                    slow-drifting body is still the safer
+    #                                    default for any future trait that does.
     hue_drift: float = 0.02           # lineage colour drift per birth
     carnivore_init_frac: float = 0.05  # fraction of founders seeded as carnivores
 
@@ -317,8 +340,11 @@ class Config:
     def in_dim(self) -> int:
         """Retina channels (food/prey/predator/water/slope per sector) + energy
         + diet + own water + four numbers per memory slot (sin/cos of bearing,
-        squashed distance, confidence)."""
-        return 5 * self.retina_sectors + 3 + 4 * self.memory_slots
+        squashed distance, confidence) + a sixth retina channel (peer, diet
+        similarity rather than difference -- appended after memory, not
+        interleaved with the other five, so it doesn't renumber any existing
+        `server/app.py` slice offset)."""
+        return 5 * self.retina_sectors + 3 + 4 * self.memory_slots + self.retina_sectors
 
     @property
     def brain_params(self) -> int:
@@ -340,6 +366,12 @@ class Config:
         one. That is why a new trait is cheap where a new sensory input is not.
         """
         return self.brain_params + 1
+
+    @property
+    def size_index(self) -> int:
+        """Column holding the body-size gene. Appended after investment for the
+        same reason investment was appended after diet."""
+        return self.brain_params + 2
 
     @property
     def genome_size(self) -> int:

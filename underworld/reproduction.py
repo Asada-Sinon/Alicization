@@ -17,7 +17,7 @@ import jax.numpy as jnp
 
 from .config import Config
 from .genome import crossover, mutate
-from .state import WorldState, invest_of
+from .state import WorldState, invest_of, size_of
 
 
 class Deaths(NamedTuple):
@@ -125,6 +125,14 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
     invest_frac = invest_of(state.genome, cfg)[parent_idx]
     invest = state.energy[parent_idx] * invest_frac
     water_invest = state.water[parent_idx] * invest_frac
+    # A small-`size` child cannot hold more water than its own tank -- without
+    # this, a large parent's absolute transfer could exceed a small-genotype
+    # child's `water_max * size`, and the excess would simply vanish into
+    # nowhere at the first `drink`-side clamp next step. Uses `child_genome`,
+    # not `state.size` (which doesn't exist -- see `state.size_of`), since the
+    # child's size is a property of its own, just-built genome.
+    child_size = size_of(child_genome, cfg)
+    water_invest = jnp.minimum(water_invest, cfg.water_max * child_size)
     offset = jax.random.uniform(
         k_pos, (cfg.n_max, 2), minval=-cfg.spawn_radius, maxval=cfg.spawn_radius
     )

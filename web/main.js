@@ -293,7 +293,7 @@
     $("itype").textContent = "在世界中点选一个个体，解析它的摇光";
     $("itype").className = "empty";
     $("itype").style.color = "";
-    ["i_id", "i_diet", "i_energy", "i_water", "i_age", "i_gen", "i_speed",
+    ["i_id", "i_diet", "i_energy", "i_water", "i_size", "i_age", "i_gen", "i_speed",
       "i_food", "i_meat", "i_dmg", "i_drink", "i_turn", "i_thrust"].forEach(
       (id) => ($(id).textContent = "–"));
     $("ibar").style.left = "0%";
@@ -320,10 +320,11 @@
 
     const cx = S / 2, cy = S / 2, R = d.sectors, w = (2 * Math.PI) / R;
     const bands = [
-      [17, 28, d.retina_food, [79, 214, 106]],
-      [29, 40, d.retina_prey, [79, 198, 230]],
-      [41, 52, d.retina_pred, [242, 64, 56]],
-      [53, 64, d.retina_water, [74, 151, 234]],
+      [17, 27, d.retina_food, [79, 214, 106]],
+      [28, 38, d.retina_prey, [79, 198, 230]],
+      [39, 49, d.retina_pred, [242, 64, 56]],
+      [50, 60, d.retina_water, [74, 151, 234]],
+      [61, 71, d.retina_peer, [230, 190, 79]],
     ];
 
     ctx.globalCompositeOperation = "lighter";
@@ -401,6 +402,7 @@
     $("i_diet").textContent = d.diet.toFixed(2);
     $("i_energy").textContent = d.energy.toFixed(1);
     $("i_water").textContent = d.water.toFixed(1);
+    $("i_size").textContent = d.size.toFixed(2);
     $("i_age").textContent = d.age.toFixed(0);
     $("i_gen").textContent = d.generation.toFixed(0);
     $("i_speed").textContent = d.speed.toFixed(1);

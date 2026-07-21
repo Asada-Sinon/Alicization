@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 
 from server import protocol
 from underworld import Config, new_world
+from underworld.state import size_of
 
 
 class Simulation:
@@ -79,6 +80,7 @@ class Simulation:
         vx, vy = float(s.vel[i, 0]), float(s.vel[i, 1])
         # 摇光 view: the agent's retina input, hidden neurons, and outputs.
         r = self.cfg.retina_sectors
+        peer_off = 5 * r + 3 + 4 * self.cfg.memory_slots
         li = np.asarray(s.last_input[i])
         hid = np.asarray(s.hidden[i])
         out = np.asarray(s.last_output[i])
@@ -86,6 +88,7 @@ class Simulation:
             "id": int(i),
             "alive": True,
             "diet": float(s.diet[i]),
+            "size": float(size_of(s.genome[i:i + 1], self.cfg)[0]),
             "energy": float(s.energy[i]),
             "water": float(s.water[i]),
             "age": float(s.age[i]),
@@ -104,6 +107,9 @@ class Simulation:
             "retina_pred": li[2 * r:3 * r].round(3).tolist(),
             "retina_water": li[3 * r:4 * r].round(3).tolist(),
             "retina_slope": li[4 * r:5 * r].round(3).tolist(),
+            # peer sits after memory, not interleaved with the other five --
+            # see sensors.sense's concatenate order and its comment.
+            "retina_peer": li[peer_off:peer_off + r].round(3).tolist(),
             "hidden": hid.round(3).tolist(),
             # Long-term memory: one row per slot, water slots first. Read off
             # `state.memory` rather than the encoded inputs -- the inspector
