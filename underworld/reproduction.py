@@ -132,10 +132,19 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
     crossed = crossover(state.genome[parent_idx], state.genome[mate_idx], k_cross, cfg)
     child_genome = mutate(crossed, k_gen, cfg)
     # How much to hand over is the parent's own gene, not a global constant.
-    # Energy and water use the same fraction: provisioning is provisioning.
+    # Energy still follows that gene alone. Water can additionally be topped
+    # up by a lactation floor (docs/water_fix_provisioning.md) that is NOT
+    # part of invest_frac's own gene-bounded range -- it is a Config constant,
+    # not a second gene, so it cannot be bred back down the way raising
+    # invest_min itself was measured to be absorbed by evolution
+    # (docs/water_system.md SS2.3/3.3, arm_B). Clipped to [0, 1] so a
+    # misconfigured floor above 1.0 can never demand more water than the
+    # parent has; at the default 0.0 this is exactly the old shared-fraction
+    # behaviour (max(invest_frac, 0.0) == invest_frac).
     invest_frac = invest_of(state.genome, cfg)[parent_idx]
     invest = state.energy[parent_idx] * invest_frac
-    water_invest = state.water[parent_idx] * invest_frac
+    water_frac = jnp.clip(jnp.maximum(invest_frac, cfg.water_lactation_floor_frac), 0.0, 1.0)
+    water_invest = state.water[parent_idx] * water_frac
     # A small-`size` child cannot hold more water than its own tank -- without
     # this, a large parent's absolute transfer could exceed a small-genotype
     # child's `water_max * size`, and the excess would simply vanish into

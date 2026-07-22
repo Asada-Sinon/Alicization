@@ -444,6 +444,62 @@ def test_child_water_investment_clamped_to_own_tank():
     assert float(child.water[i]) <= cfg.water_max * child_size + 1e-4
 
 
+def test_water_lactation_floor_is_a_noop_at_default():
+    """`water_lactation_floor_frac` defaults to 0.0, which must not change a
+    single float versus the old `water = parent_water * invest_frac` formula
+    -- this is the golden-band invariant the whole mechanism rests on."""
+    cfg = tiny_cfg(n_max=64, n_init=8)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+
+    genome = state.genome.at[0, cfg.invest_index].set(-1.0)  # low, not floor-clamped
+    alive = jnp.arange(cfg.n_max) < 1
+    energy = jnp.where(alive, cfg.repro_threshold + 5.0, 0.5)
+    water = jnp.where(alive, 6.0, 0.1)
+    state = state._replace(alive=alive, genome=genome, energy=energy, water=water)
+
+    child = reproduction.reproduce(state, jax.random.PRNGKey(1), cfg)
+    frac = float(invest_of(state.genome, cfg)[0])
+    born = np.asarray(child.alive & ~state.alive)
+    i = int(np.flatnonzero(born)[0])
+    assert float(child.water[i]) == pytest.approx(6.0 * frac, rel=1e-5)
+
+
+def test_water_lactation_floor_decouples_water_from_energy_investment():
+    """The whole point of the mechanism (docs/water_fix_provisioning.md): a
+    parent with a LOW invest_frac must still hand over a floored water
+    fraction once `water_lactation_floor_frac` is raised, while its ENERGY
+    handover stays exactly `invest_frac`-proportional -- unlike raising
+    `invest_min` itself (docs/water_system.md arm_B), which moves both
+    resources together because they share one gene."""
+    cfg = tiny_cfg(n_max=64, n_init=8, water_lactation_floor_frac=0.6)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+
+    genome = state.genome.at[0, cfg.invest_index].set(-4.0)  # ~invest_min = 0.2
+    alive = jnp.arange(cfg.n_max) < 1
+    energy = jnp.where(alive, cfg.repro_threshold + 5.0, 0.5)
+    water = jnp.where(alive, 6.0, 0.1)
+    state = state._replace(alive=alive, genome=genome, energy=energy, water=water)
+
+    frac = float(invest_of(state.genome, cfg)[0])
+    assert frac == pytest.approx(cfg.invest_min, abs=0.02)
+
+    child = reproduction.reproduce(state, jax.random.PRNGKey(1), cfg)
+    born = np.asarray(child.alive & ~state.alive)
+    i = int(np.flatnonzero(born)[0])
+    parent_energy = float(cfg.repro_threshold + 5.0)
+    # Energy handover still follows invest_frac alone -- the floor never
+    # touches it.
+    assert float(child.energy[i]) == pytest.approx(parent_energy * frac, rel=0.02)
+    # Water handover is floored to 0.6 of the parent's water, well above what
+    # the ~0.2 investment gene alone would have given (1.2 vs 3.6).
+    assert float(child.water[i]) == pytest.approx(6.0 * 0.6, rel=1e-5)
+    assert float(child.water[i]) > 6.0 * frac * 1.5
+
+
 def test_peer_channel_reveals_similar_diet_neighbours():
     """`prey`/`pred` are diet-*difference* channels and are both exactly zero
     for two agents of near-identical diet -- conspecifics were mutually
