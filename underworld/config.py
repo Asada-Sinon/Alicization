@@ -61,13 +61,22 @@ class Config:
     max_turn: float = 3.0          # radians / second
     base_cost: float = 0.02        # energy / step just to exist
     move_cost: float = 0.05        # extra energy / step at full thrust
-    carn_cost: float = 0.10        # extra upkeep scaled by diet: idle predators
+    carn_cost: float = 0.15        # extra upkeep scaled by diet: idle predators
     #                                die back fast, coupling their numbers to prey.
-    #                                Was 0.15 in the flat 256^2 world; the terrain
-    #                                world charges predators for climbing and slows
-    #                                them in cover, and at 0.15 they went extinct on
-    #                                every seed tested. 0.10 restores a ~15% carnivore
-    #                                fraction (measured over 3 seeds).
+    #                                History: 0.15 in the flat 256^2 world; the
+    #                                terrain world charges predators for climbing and
+    #                                slows them in cover, and at 0.15 under the OLD
+    #                                (undoubled) water economy they went extinct on
+    #                                every seed, so it was dropped to 0.10 (~15% carn).
+    #                                Restored to 0.15 as the *compensation knob* of the
+    #                                water retune (docs/water_fix_decision.md): with
+    #                                base/move_water_cost halved below, 0.15 is a healthy
+    #                                working point (carn_frac 0.216, 6 seeds, min 0.194,
+    #                                none near extinction) that holds predators off the
+    #                                river without inflating their share. NARROW window:
+    #                                +0.05 is a cliff (0.20 -> 0.10, 0.25+ -> die-off).
+    #                                Do NOT retune water amplitude or terrain without
+    #                                re-calibrating this (docs/water_fix_retune.md 4.2).
 
     # --- feeding: herbivory (plant field) ---
     eat_rate: float = 1.5          # max plant energy an agent drains / step
@@ -146,8 +155,19 @@ class Config:
     water_init: float = 8.0
     water_max: float = 10.0           # hydration cap
     water_scale: float = 10.0         # normalizer for the own-water sensor input
-    base_water_cost: float = 0.02     # water / step just to exist
-    move_water_cost: float = 0.05     # extra water / step at full thrust (panting)
+    base_water_cost: float = 0.01     # water / step just to exist. Halved from 0.02
+    #                                   as the "water valve" of the retune
+    #                                   (docs/water_fix_decision.md): the master fix
+    #                                   for the juvenile-thirst bottleneck. Paired with
+    #                                   carn_cost=0.15 above so the extra prey it saves
+    #                                   don't inflate carnivore share. Drops thirst
+    #                                   deaths 0.829->0.540 and pushes predators off the
+    #                                   river (carn_water_dist 11.4->25.3), 6 seeds.
+    move_water_cost: float = 0.025    # extra water / step at full thrust (panting).
+    #                                   Halved from 0.05 with base_water_cost (same
+    #                                   retune). Cost: population ~+79% -- a known,
+    #                                   separately-tracked tradeoff (docs/rebalance.md
+    #                                   holds "shrink population" as an orthogonal axis).
     drink_rate: float = 2.0           # water gained / step while standing in the stream
     water_deficit_buffer: float = 0.0  # how far below zero `water` can go before
     #                                    `reproduction.cull` calls it dehydration
