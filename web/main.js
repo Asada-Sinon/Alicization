@@ -433,8 +433,12 @@
       if ((a[i * STRIDE + 4] | 0) === selectedId) {
         const p = Renderer.canvasFromWorld(a[i * STRIDE], a[i * STRIDE + 1]);
         if (!p) { ring.style.display = "none"; return; }  // camera-occluded, not dead
-        ring.style.left = p.x + "px";
-        ring.style.top = p.y + "px";
+        // p is canvas-relative (Renderer.canvasFromWorld's contract), but #ring
+        // is positioned against #stage's padding edge, same as #sigil below --
+        // #stage pads the canvas in on all sides, so the two origins are not
+        // the same point and canvas.offsetLeft/Top is the correction.
+        ring.style.left = (canvas.offsetLeft + p.x) + "px";
+        ring.style.top = (canvas.offsetTop + p.y) + "px";
         ring.style.display = "block";
         return;
       }
