@@ -880,3 +880,76 @@ def test_death_causes_partition_the_toll():
     assert int(deaths.predation) > 0
     # The dead never come back to life.
     assert bool(jnp.all(post.alive <= pre.alive))
+
+
+def test_water_deficit_buffer_defaults_to_old_instant_death():
+    """cfg.water_deficit_buffer=0.0 (the default) must reproduce the exact old
+    `water <= 0.0` rule -- docs/water_fix_buffer.md's whole golden-band argument
+    rests on this being a true no-op at the default value."""
+    cfg = tiny_cfg()  # water_deficit_buffer=0.0 by default
+    state, key, _step, _scan, terrain = new_world(cfg)
+    n = cfg.n_max
+    water = jnp.where(jnp.arange(n) % 3 == 0, 0.0, 1.0)          # exactly zero
+    water = jnp.where(jnp.arange(n) % 3 == 1, -0.5, water)       # negative
+    pre = state._replace(water=water)
+    _post, deaths = reproduction.cull(pre, jnp.zeros(n), cfg)
+    exactly_zero = jnp.sum(pre.alive & (jnp.arange(n) % 3 == 0))
+    negative = jnp.sum(pre.alive & (jnp.arange(n) % 3 == 1))
+    # Both "exactly zero" and "negative" must die when the buffer is 0 -- only
+    # strictly positive water survives, same as the pre-existing rule.
+    assert int(deaths.thirst) >= int(exactly_zero) + int(negative)
+
+
+def test_water_deficit_buffer_delays_death_within_tolerance():
+    """With a positive buffer, water may run negative down to -buffer without
+    counting as dehydration; past -buffer it still kills, same as before. This
+    is the mechanism docs/water_fix_buffer.md proposes: a mild sign-flip from
+    real mammals' tolerance for a double-digit-percent water deficit."""
+    cfg = tiny_cfg(water_deficit_buffer=2.0)
+    state, key, _step, _scan, terrain = new_world(cfg)
+    n = cfg.n_max
+    # Three bands: comfortably positive, in the tolerated deficit, past it.
+    water = jnp.where(jnp.arange(n) % 3 == 0, 1.0, -1.0)         # ok / in-buffer
+    water = jnp.where(jnp.arange(n) % 3 == 2, -3.0, water)       # past the buffer
+    pre = state._replace(water=water)
+    post, deaths = reproduction.cull(pre, jnp.zeros(n), cfg)
+
+    in_buffer = pre.alive & (jnp.arange(n) % 3 == 1)   # water == -1.0, buffer == 2.0
+    past_buffer = pre.alive & (jnp.arange(n) % 3 == 2)  # water == -3.0
+    # In-buffer agents must survive this cull...
+    assert bool(jnp.all(post.alive[in_buffer] == pre.alive[in_buffer]))
+    # ...but agents past the buffer must still die.
+    assert bool(jnp.all(~post.alive[past_buffer]))
+    assert int(deaths.thirst) >= int(jnp.sum(past_buffer))
+    # Living water may now sit below zero (down to -buffer) without being dead --
+    # the invariant relaxes from "living implies water > 0" to "living implies
+    # water > -buffer", which is the whole point of the mechanism.
+    living_water = post.water[post.alive]
+    assert bool(jnp.all(living_water > -cfg.water_deficit_buffer - 1e-4))
+
+
+def test_reproduce_does_not_conjure_water_from_a_deficit_parent():
+    """A parent with negative water (possible only when water_deficit_buffer > 0
+    -- see docs/water_fix_buffer.md) must not (a) gain water by "investing" a
+    negative fraction into a child, or (b) hand the child negative starting
+    water. Both would be free water conjured from a negative number, on top of
+    a child born already dehydrated -- neither is defensible."""
+    cfg = tiny_cfg(n_max=64, n_init=8, water_deficit_buffer=3.0)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+
+    genome = state.genome.at[0, cfg.invest_index].set(4.0)  # near invest_max
+    alive = jnp.arange(cfg.n_max) < 1
+    energy = jnp.where(alive, cfg.repro_threshold + 5.0, 0.5)
+    water = jnp.where(alive, -1.0, 0.1)   # parent in deficit but still alive
+    state = state._replace(alive=alive, genome=genome, energy=energy, water=water)
+
+    child = reproduction.reproduce(state, jax.random.PRNGKey(1), cfg)
+    born = np.asarray(child.alive & ~state.alive)
+    assert born.sum() == 1
+    i = int(np.flatnonzero(born)[0])
+    assert float(child.water[i]) >= 0.0, "child must not start already dehydrated"
+    # The parent's own water must not have gone *up* from "investing" a
+    # negative fraction of a negative balance.
+    assert float(child.water[0]) <= float(state.water[0]) + 1e-4

@@ -149,6 +149,21 @@ class Config:
     base_water_cost: float = 0.02     # water / step just to exist
     move_water_cost: float = 0.05     # extra water / step at full thrust (panting)
     drink_rate: float = 2.0           # water gained / step while standing in the stream
+    water_deficit_buffer: float = 0.0  # how far below zero `water` can go before
+    #                                    `reproduction.cull` calls it dehydration
+    #                                    death (docs/water_fix_buffer.md). Real
+    #                                    mammals don't die the instant water hits
+    #                                    zero -- ordinary mammals tolerate ~10-12%
+    #                                    body-mass water loss, camels 25-30%
+    #                                    (Schmidt-Nielsen et al. 1956) -- so a
+    #                                    zero-buffer instant-death rule is a
+    #                                    simplification with no biological
+    #                                    grounding. Default 0.0 reproduces the old
+    #                                    behaviour exactly (`water <= 0` is the
+    #                                    same test as `water <= -0.0`), same
+    #                                    convention as `trample_impact`: this
+    #                                    doesn't exist until an ablation arm turns
+    #                                    it on with --set water_deficit_buffer=....
     forage_water_frac: float = 0.10   # water drawn per unit of energy grazed.
     #                                   Measured: a herbivore at equilibrium takes
     #                                   mean(last_food)=0.144/step and pays
