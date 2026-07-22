@@ -59,6 +59,12 @@ class Metrics(NamedTuple):
     # it just sit at the neutral 1.0 starting point?
     mean_size: jax.Array
     size_std: jax.Array
+    # G-matrix off-diagonals: does selection couple body size to the other two
+    # evolving traits? Computed the same long way as `invest_diet_corr` (Pearson
+    # over the living only, `denom` is the living count) so all three trait-pair
+    # correlations share one estimator. Appended, never inserted.
+    size_diet_corr: jax.Array   # do carnivores carry a different body size?
+    size_invest_corr: jax.Array # is size allometrically tied to per-birth investment?
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -94,9 +100,15 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
     size_var = jnp.sum(((size - mean_size) ** 2) * alive) / denom
     d_inv = (invest - mean_invest) * alive
     d_diet = (state.diet - mean_diet) * alive
+    d_size = (size - mean_size) * alive
     invest_var = jnp.sum(d_inv * d_inv) / denom
     cov = jnp.sum(d_inv * d_diet) / denom
     corr = cov / jnp.maximum(jnp.sqrt(invest_var * diet_var), 1e-8)
+    # G-matrix off-diagonals involving size, same estimator as `corr` above.
+    cov_sd = jnp.sum(d_size * d_diet) / denom
+    cov_si = jnp.sum(d_size * d_inv) / denom
+    size_diet_corr = cov_sd / jnp.maximum(jnp.sqrt(size_var * diet_var), 1e-8)
+    size_invest_corr = cov_si / jnp.maximum(jnp.sqrt(size_var * invest_var), 1e-8)
 
     return Metrics(
         population=pop,
@@ -129,4 +141,6 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         deathage_senescence=deaths.age_senescence.astype(jnp.float32),
         mean_size=mean_size,
         size_std=jnp.sqrt(size_var),
+        size_diet_corr=size_diet_corr,
+        size_invest_corr=size_invest_corr,
     )
