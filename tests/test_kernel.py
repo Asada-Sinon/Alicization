@@ -572,6 +572,115 @@ def test_peer_channel_can_be_disabled():
         "peer channel must be forced to zero when peer_channel_enabled=False"
 
 
+def test_los_occlusion_default_is_truly_off():
+    """`los_occlusion_enabled` defaults to False (docs/three_d.md S5.1), the
+    same convention as `trample_impact`: the mechanism doesn't exist unless an
+    ablation arm explicitly turns it on. Unlike the trample tests, there is no
+    always-on field to show "differs but doesn't matter" -- when the flag is
+    off, `sensors.sense` must skip the whole line-of-sight block at trace time
+    (see the `if cfg.los_occlusion_enabled:` guard), so varying `los_samples`/
+    `los_margin` while leaving the flag off must produce a bit-identical run,
+    not merely a numerically close one.
+    """
+    from underworld import spatial, sensors
+
+    cfg_a = tiny_cfg(los_samples=3, los_margin=0.01)
+    cfg_b = tiny_cfg(los_samples=8, los_margin=5.0)
+    assert cfg_a.los_occlusion_enabled is False
+    assert cfg_b.los_occlusion_enabled is False
+
+    state_a, ms_a = run(cfg_a, 300)
+    state_b, ms_b = run(cfg_b, 300)
+    assert bool(jnp.array_equal(state_a.alive, state_b.alive))
+    assert bool(jnp.array_equal(ms_a.population, ms_b.population))
+    assert bool(jnp.array_equal(state_a.pos, state_b.pos))
+    assert bool(jnp.array_equal(state_a.energy, state_b.energy))
+    assert bool(jnp.array_equal(state_a.last_input, state_b.last_input))
+
+    # Also check directly against sensors.sense with occlusion physically
+    # present in the terrain: with the flag off it must still be ignored.
+    cfg_on = tiny_cfg(n_max=8, n_init=2, world_size=128.0, grid=32,
+                       sense_grid=3, vision_radius=40.0, forest_occlusion=0.0,
+                       los_occlusion_enabled=True)
+    cfg_off = tiny_cfg(n_max=8, n_init=2, world_size=128.0, grid=32,
+                        sense_grid=3, vision_radius=40.0, forest_occlusion=0.0,
+                        los_occlusion_enabled=False)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg_on)
+    state = init_state(cfg_on, key, terrain)
+    pos = state.pos.at[0].set(jnp.array([20.0, 64.0]))
+    pos = pos.at[1].set(jnp.array([50.0, 64.0]))
+    state = state._replace(pos=pos, diet=jnp.full((cfg_on.n_max,), 0.5))
+
+    g = cfg_on.grid
+    height = jnp.zeros((g, g)).at[16, 7:10].set(5.0).reshape(-1)
+    mountain = terrain._replace(height=height)
+
+    table = spatial.build_table(state, cfg_on)
+    nbr = spatial.gather_neighbors(state, table, cfg_on)
+    delta, dist, valid = spatial.geometry(state, nbr, cfg_on)
+
+    inputs_off = sensors.sense(state, nbr, delta, dist, valid, mountain, cfg_off)
+    r = cfg_off.retina_sectors
+    peer_off = 5 * r + 3 + 4 * cfg_off.memory_slots
+    li_off = np.asarray(inputs_off[0])
+    assert float(np.max(li_off[peer_off:peer_off + r])) > 0.1, \
+        "a mountain in the terrain must have zero effect when the flag is off"
+
+
+def test_los_occlusion_blocks_view_through_mountain():
+    """docs/three_d.md S5.1: with `los_occlusion_enabled=True`, a candidate
+    otherwise inside vision range must become invisible if a tall ridge sits
+    on the line between it and the observer -- checked directly against
+    `sensors.sense` output (same technique as
+    `test_peer_channel_reveals_similar_diet_neighbours`), not end-to-end.
+    """
+    from underworld import spatial, sensors
+
+    # sense_grid must satisfy cell_size >= vision_radius (world_size / sense_grid
+    # >= vision_radius) or the 3x3 neighbour block can miss a candidate this far
+    # away -- see the config comment on `sense_grid`.
+    cfg = tiny_cfg(n_max=8, n_init=2, world_size=128.0, grid=32, sense_grid=3,
+                   vision_radius=40.0, forest_occlusion=0.0,
+                   los_occlusion_enabled=True)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+
+    # Observer and candidate 30 world units apart (< vision_radius=40, so
+    # visible on flat ground), same y so the ridge sits squarely between them.
+    pos = state.pos.at[0].set(jnp.array([20.0, 64.0]))
+    pos = pos.at[1].set(jnp.array([50.0, 64.0]))
+    state = state._replace(pos=pos, diet=jnp.full((cfg.n_max,), 0.5))
+
+    r = cfg.retina_sectors
+    peer_off = 5 * r + 3 + 4 * cfg.memory_slots
+
+    table = spatial.build_table(state, cfg)
+    nbr = spatial.gather_neighbors(state, table, cfg)
+    delta, dist, valid = spatial.geometry(state, nbr, cfg)
+    # Both endpoint cells (x=20 -> cell 5, x=50 -> cell 12) are flat (height 0);
+    # a tall, narrow ridge sits at cells x in [7, 9] on the same row -- squarely
+    # between the two agents and well clear of both endpoints.
+    g = cfg.grid
+    mountain_height = jnp.zeros((g, g)).at[16, 7:10].set(5.0).reshape(-1)
+    mountain = terrain._replace(height=mountain_height)
+
+    inputs = sensors.sense(state, nbr, delta, dist, valid, mountain, cfg)
+    li = np.asarray(inputs[0])
+    assert float(np.max(li[peer_off:peer_off + r])) < 1e-6, \
+        "candidate behind the ridge must be invisible (peer channel forced to 0)"
+
+    # Same positions, same distance, but flat terrain: the candidate must
+    # remain visible -- guards against an occlusion criterion so strict it
+    # blocks everyone regardless of terrain.
+    flat = terrain._replace(height=jnp.zeros_like(terrain.height))
+    inputs_flat = sensors.sense(state, nbr, delta, dist, valid, flat, cfg)
+    li_flat = np.asarray(inputs_flat[0])
+    assert float(np.max(li_flat[peer_off:peer_off + r])) > 0.1, \
+        "same distance, no mountain in the way -- must not be falsely occluded"
+
+
 def test_memory_is_not_heritable():
     """A newborn starts with an empty map, and the parent keeps its own.
 

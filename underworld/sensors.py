@@ -25,6 +25,12 @@ where prey/pred both vanish.
 Under dense canopy the effective vision radius shrinks (`forest_occlusion`) while
 `attack_range` does not -- short sight with unchanged reach is what makes forest
 genuine ambush cover.
+
+Optionally (`los_occlusion_enabled`, default off), a candidate within vision
+range is still invisible if the terrain between it and the observer rises above
+the straight line between their two heights -- a mountain blocks sight, docs/
+three_d.md S5.1. This only zeroes `closeness` for prey/pred/peer; it adds no
+retina channel and does not change `in_dim`.
 """
 
 from __future__ import annotations
@@ -62,6 +68,41 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     own_cell = pos_to_cell(state.pos, cfg)
     vision = cfg.vision_radius * (1.0 - cfg.forest_occlusion * terrain.forest[own_cell])
     closeness = jnp.clip(1.0 - dist / vision[:, None], 0.0, 1.0) * valid
+
+    # Terrain line-of-sight (docs/three_d.md S5.1): a candidate otherwise inside
+    # vision range is invisible if a mountain sits between it and the observer.
+    # `los_occlusion_enabled` is a Python bool baked into the jit (Config is
+    # closed over, not traced), so this whole block is absent from the trace --
+    # not merely zeroed -- when off, matching the `trample_impact`-style
+    # ablation convention: the mechanism doesn't exist until switched on.
+    if cfg.los_occlusion_enabled:
+        # `delta` (from spatial.geometry) is already the shortest torus vector
+        # observer->candidate, so interior points on the line are obtained by
+        # scaling it, and re-wrapping is the *only* place the torus needs
+        # handling -- never recompute from absolute positions.
+        cand_pos = jnp.mod(state.pos[:, None, :] + delta, cfg.world_size)  # [n, M, 2]
+        m = cand_pos.shape[1]
+        cand_h = terrain.height[pos_to_cell(cand_pos.reshape(-1, 2), cfg)].reshape(n, m)
+        own_h = terrain.height[own_cell]                                   # [n]
+
+        s = cfg.los_samples
+        frac = jnp.arange(1, s + 1, dtype=jnp.float32) / (s + 1)           # [S]
+        sample_pos = jnp.mod(
+            state.pos[:, None, None, :]
+            + delta[:, :, None, :] * frac[None, None, :, None],
+            cfg.world_size,
+        )                                                                  # [n, M, S, 2]
+        sample_h = terrain.height[
+            pos_to_cell(sample_pos.reshape(-1, 2), cfg)
+        ].reshape(n, m, s)
+
+        # A straight line-of-sight would see the linear interpolation between
+        # the two endpoint heights; a sample rising more than `los_margin`
+        # above that interpolation is a ridge poking through the sightline.
+        interp_h = own_h[:, None, None] + (cand_h - own_h[:, None])[:, :, None] * frac[None, None, :]
+        blocked = jnp.any(sample_h - interp_h > cfg.los_margin, axis=2)     # [n, M]
+        closeness = jnp.where(blocked, 0.0, closeness)
+
     prey_val = closeness * jnp.maximum(di - diet_j, 0.0)       # j more herbivorous
     pred_val = closeness * jnp.maximum(diet_j - di, 0.0)       # j more carnivorous
     # Similarity rather than difference: 1.0 at diet_j == di, falling off to 0
