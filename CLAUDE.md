@@ -15,32 +15,49 @@ brain = 摇光/fluctlight, time acceleration = FLA.
 The package is **not pip-installed**. Run everything from the repo root; scripts do
 `sys.path.insert(0, ".")`.
 
+**Every python invocation needs `XLA_PYTHON_CLIENT_PREALLOCATE=false`.** Without
+it JAX preallocates 75% of the card and the next process to start dies with a
+fake `CUDA_ERROR_OUT_OF_MEMORY`; the real peak is 918 MiB. A `PreToolUse` hook
+enforces this, so a missing prefix is refused rather than debugged. Why it
+matters: `docs/conventions.md` §1.
+
 ```bash
-.venv/bin/python -m pytest                                   # all kernel tests
+XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/check.py   # ~14s
+.venv/bin/python scripts/check.py --contracts                 # ~0.2s, no JAX
+.venv/bin/python scripts/check.py --full                      # + pytest, ~3min
+.venv/bin/python -m pytest                                    # all kernel tests
 .venv/bin/python -m pytest tests/test_kernel.py::test_determinism   # one test
-.venv/bin/python scripts/run_headless.py                     # 4000 steps, prints metrics
-.venv/bin/python scripts/run_headless.py 30000 500           # total_steps, chunk
-.venv/bin/python scripts/run_live.py                         # dashboard at :8000
-.venv/bin/python scripts/run_live.py --host 0.0.0.0 --no-open  # remote box
-node --check web/main.js && node --check web/render.js       # no JS build step
+.venv/bin/python scripts/run_headless.py                      # 4000 steps, prints metrics
+.venv/bin/python scripts/run_headless.py 30000 500            # total_steps, chunk
+.venv/bin/python scripts/run_live.py                          # dashboard at :8000
+.venv/bin/python scripts/run_live.py --host 0.0.0.0 --no-open   # remote box
+node --check web/main.js && node --check web/render.js        # no JS build step
 ```
-
-**`CUDA_ERROR_OUT_OF_MEMORY` here is almost always a preallocation artifact, not
-a real shortage.** JAX grabs 75% of the card up front (18.5 GB of 24 GB), so the
-*second* process to start fails even though a full-size run's real peak is
-**918 MiB** (measured, `n_max=16384`). Set
-
-```bash
-XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python ...
-```
-
-and a dozen runs coexist happily — which is how the multi-seed sweeps get run in
-parallel. Without it you are serialising jobs for no reason, and a live
-`run_live.py` will appear to "hold the whole GPU" (it does not; it holds the
-preallocation).
 
 There is no linter, formatter, or JS toolchain configured. `web/` is plain
 ES5-flavoured JS served statically by FastAPI — no bundler, no `node_modules`.
+
+## Verification
+
+`scripts/check.py` is the fast loop, and it exists because there was nothing
+between "it looks right" and a three-minute test suite. Run it after every
+change; **paste its output rather than asserting the work is done.**
+
+- **tier 1 (`--contracts`, 0.2s, no JAX)** — the cross-file contracts below,
+  checked mechanically: the wire format against every offset in `web/main.js`,
+  the species colours across the three files that duplicate them, the config
+  scaling rules, syntax. A `PostToolUse` hook runs this after every source edit,
+  so a broken contract comes back immediately instead of at the next commit.
+- **tier 2 (default, 14s)** — a 2048-agent, 200-step world: no NaN, shapes
+  intact, fields inside their capacities, plus a **golden band** on ten metrics
+  in `scripts/golden.json`. That band is what catches a config change that
+  silently moves the population — a 3% nudge to `eat_rate` trips it.
+- **tier 3 (`--full`)** — everything plus `pytest`. This is the pre-commit run.
+
+If a change is *meant* to move the golden numbers, re-record with `--bless` and
+say why in the commit message. **Never widen the bands to make a failure go
+away** — a band widened for that reason is a check deleted. Band sizing and the
+measurement behind it: `docs/conventions.md` §9.
 
 ## Git
 
@@ -53,46 +70,30 @@ Commit as you finish each coherent piece of work rather than letting changes pil
 **Once the checks below pass, push to `origin main` without asking** — the push is
 part of finishing the work, not a separate decision needing sign-off.
 
-**Split by reason for change, not by feature.** A useful test: if the commit message
-needs the words "also" or "while I was there", it should have been two commits. One
-past commit bundled a new resource layer, a wire-protocol bump, and a shader change
-across 14 files — that should have been three, because a later reader looking for
-"when did the protocol change" has to read a message about fruit ecology to find it.
+**Split by reason for change, not by feature.** A useful test: if the commit
+message needs the words "also" or "while I was there", it should have been two
+commits. The 14-file commit that taught this: `docs/conventions.md` §2.
 
-**Commit messages are written in Chinese** — both the subject line and the body.
-This is the project's convention; follow it even when the conversation is in
-English. Two things stay as they are:
-
-- the `Co-Authored-By:` trailer, which is parsed by tooling, not read as prose
-- identifiers quoted from the code (`carn_cost`, `world_step`, `UNTR`, file paths),
-  which are names, not description — don't translate them
-
-The bar for the body is the same as it would be in English: say *why* the change
-was made and what was measured, not just what was touched.
-
-```
-为地形系统增加山脉、河流与森林
-
-将世界扩大到 512²，让"待在哪里"本身成为值得演化的决策……
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
-```
+**Commit messages are written in Chinese** — subject and body — even when the
+conversation is in English. Two things stay as they are: the `Co-Authored-By:`
+trailer (parsed by tooling, not read as prose) and identifiers quoted from the
+code (`carn_cost`, `world_step`, `UNTR`, file paths — those are names, not
+description). Say *why* the change was made and what was measured. Example and
+full rationale: `docs/conventions.md` §2.
 
 Before committing, make sure the work actually holds:
 
 ```bash
-pkill -f "[s]cripts/run_live.py"    # brackets stop the pattern matching its
-                                    # own shell. Only needed if you did NOT
-                                    # set PREALLOCATE=false above.
-XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python -m pytest
-node --check web/main.js && node --check web/render.js   # if web/ changed
+XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/check.py --full
 ```
 
-The full suite takes several minutes — give it a long timeout rather than
-assuming it hung.
+That is `check.py` plus the whole suite; it takes several minutes — give it a
+long timeout rather than assuming it hung.
 
-Wire-format or shader changes need more than tests — see the contracts section below;
-verify them against a running server or a screenshot before committing.
+Wire-format and shader changes need more than tests. `check.py --contracts`
+covers the protocol offsets and the duplicated colours mechanically, but a
+shader still has to be *looked at* — verify against a running server or a
+screenshot before committing (`docs/conventions.md` §10).
 
 Keep out of the repo: screenshots, scratch scripts, `node_modules`, and anything
 under `outputs/ checkpoints/ runs/`. `.gitignore` covers `*.log` and the usual
@@ -102,26 +103,20 @@ Python/venv noise, but scratch work belongs in the session scratchpad, not here.
 
 **Any investigation whose output is a conclusion rather than code MUST be written
 to a file under `docs/` and committed before the task is considered done.** A
-report that exists only in conversation is lost at the next context compaction —
-this has already happened once: a full feasibility study on moving to 3D was
-completed, verbally relayed, acted on by nobody, and then vanished, so the same
-question had to be asked again from scratch weeks later.
+report that exists only in conversation is lost at the next context compaction,
+and that has already cost this project a full 3D feasibility study once
+(`docs/conventions.md` §3).
 
-- One topic, one file: `docs/<topic>.md`. Long is fine. These are allowed — and
-  encouraged — to read like literature reviews: full prose, real citations
-  (author, year, venue), tables, derivations, dead ends. They are not prompts
-  and should not be compressed into bullet-point instructions.
-- **Mark every claim by how it was established.** `docs/biology.md` uses
-  `[现实]` (published fact), `[本世界实测]` (measured here), `[对应]` (where it
-  lands in the code), `[提案，非结论]` (proposal, not a finding). Reuse that
-  vocabulary. State plainly when a source could not be verified rather than
-  laundering it into confident prose.
-- Add a one-line pointer in `docs/TODO.md` so the next session finds it without
-  reading everything.
-- Negative and inconclusive results are the point, not an embarrassment — most
-  of §9, §11, §12 and §13 of `docs/biology.md` are failures, and they are the
-  most load-bearing sections in the file because they stop the same idea being
-  re-attempted.
+- One topic, one file: `docs/<topic>.md`. Long is fine — these should read like
+  literature reviews (full prose, real citations, tables, derivations, dead
+  ends), not like prompts.
+- **Mark every claim by how it was established**: `[现实]` published fact,
+  `[本世界实测]` measured here, `[对应]` where it lands in the code,
+  `[提案，非结论]` proposal. Say plainly when a source could not be verified
+  rather than laundering it into confident prose.
+- Add a one-line pointer in `docs/TODO.md` so the next session finds it.
+- Negative and inconclusive results are the point, not an embarrassment. They
+  are what stop the same idea being re-attempted.
 
 ## Architecture
 
@@ -192,18 +187,10 @@ is the natural `argmin` target, so no validity mask is needed.
 
 Newborns get **empty** slots. Genes cross generations; memory is acquired within a
 lifetime and dies with its holder — copying a parent's slots at birth is Lamarckian.
-Removed in `cbe434d`; don't reintroduce it.
-
-An earlier version of this paragraph said the copy "was also measured to do
-nothing." **That was an overclaim and is worth keeping as a cautionary note.** The
-data (n=6 paired, mean `inland_frac` +0.020, paired SD 0.031) gives p=0.175 with a
-95% interval of [−0.013, +0.053] and **25% power** — a null was the most likely
-outcome even if the true effect were exactly the +0.020 observed. What the data
-does support, by equivalence test, is the narrower claim that any effect is
-**smaller than 0.05** (TOST p=0.032). Removing the mechanism was still right,
-because the Lamarckian argument stands on its own and the burden was on the
-mechanism — but "underpowered, bounded below 0.05" is the honest description, not
-"does nothing."
+Removed in `cbe434d`; don't reintroduce it. The ablation that tested this was
+underpowered and an earlier note here overclaimed it as "measured to do nothing";
+the honest reading, and why removal was still right, is in
+`docs/conventions.md` §4.
 
 The legitimate route to cross-generational knowledge is social learning — juveniles
 following adults and drinking for themselves, which `memory.write` already
@@ -249,6 +236,12 @@ backpressure for free. The dashboard can attach/detach without disturbing a run.
 
 ## Cross-file contracts (these break silently)
 
+`check.py --contracts` now verifies the mechanical half of this section — header
+size, every f32/u32 offset, the `encode()` arity, the terrain magic, and the
+duplicated colours — in 0.2s, and a hook runs it after every edit. What follows
+is the design discipline the checker cannot express: *why* these are shaped the
+way they are, and which changes are safe.
+
 **Binary protocol.** `server/protocol.py` defines a packed header + agents + plant field.
 Three places must change together:
 - the `_HEADER` struct format string and the `encode()` pack call
@@ -277,72 +270,63 @@ world-generation formula is duplicated in GLSL any more. (This replaced an earli
 contract where the stream's sine formula had to be kept in sync between
 `ecology.py` and `PLANT_FS`.)
 
-**Species colours are duplicated in three files** and must match exactly:
-`web/render.js` shader constants (`vec3` literals), `web/index.html` `:root` custom
-properties, and the `C` object in `web/main.js`. Herbivore `#9e52eb` = `vec3(0.62,0.32,0.92)`,
-carnivore `#f24038` = `vec3(0.95,0.25,0.22)`. They were out of sync once already.
+**Species colours are duplicated in three files** — `web/render.js` shader `vec3`
+literals, `web/index.html` `:root` properties, the `C` object in `web/main.js` —
+and were out of sync once already. Herbivore `#9e52eb`, carnivore `#f24038`; the
+checker holds all three in agreement, so add any new duplicated colour to
+`check_species_colours` rather than to a comment. (`--plant: #1a8033` in
+`index.html` still claims to equal a `render.js` constant that no longer exists;
+the plant colour is now folded into the terrain shading and has no single
+literal to match.)
 
 ## Working on this codebase
 
-**Ecology parameters are empirically tuned, not arbitrary.** `config.py` carries long
-comments recording what was tried and why values are where they are (`plant_max`,
-`regrow_baseline`, `attack_range`, `carn_cost`, `n_init`). Several plausible-looking
-changes have been tested and rejected because they drove carnivores extinct over 20k+
-steps. Don't retune casually; validate with a long `run_headless.py` run and watch
-`carn%`, `dietSD`, and `pop` for collapse, not just the first few hundred steps.
+**Ecology parameters are empirically tuned, not arbitrary.** `config.py` carries
+long comments recording what was tried and why (`plant_max`, `regrow_baseline`,
+`attack_range`, `carn_cost`, `n_init`). Several plausible-looking changes were
+tested and rejected because they drove carnivores extinct over 20k+ steps.
+`check.py`'s golden band now trips on a 3% nudge, which tells you a change had an
+effect — it does not tell you the effect is good. Validate with a long
+`run_headless.py` run and watch `carn%`, `dietSD` and `pop` for collapse, not
+just the first few hundred steps. What has already been tried and rejected:
+`docs/conventions.md` §8.
 
-**Never tune ecology on a single run.** Carnivore survival is a near-threshold
-stochastic process, and run-to-run variance is larger than most parameter effects.
-A config that looked clearly best on one seed scored 0% carnivores on all four
-seeds tested, while one that looked clearly worst averaged 2%+ — the entire
-first-pass conclusion was noise.
+**Never tune ecology on a single run.** Carnivore survival is near-threshold and
+run-to-run variance exceeds most parameter effects: a config that looked clearly
+best on one seed scored 0% carnivores on all four seeds tested, while one that
+looked clearly worst averaged 2%+. The entire first-pass conclusion was noise.
 
-**Six seeds paired, or five per arm unpaired — three is below the floor.** This
-supersedes an earlier "≥3 seeds" rule here, which was arithmetically incapable of
-producing a result: the *smallest attainable* two-sided p is 0.10 for a 3-vs-3
-Mann-Whitney and 0.25 for a 3-pair signed-rank test, whatever the data. n=4 per
-arm unpaired and n=6 paired are the first sample sizes where the test can reach
-0.05 at all. Measured between-seed SD here is `inland_frac` ±0.027 and
-`carnivore_frac` ±0.012, so detecting a 0.02 shift in `inland_frac` at 80% power
-needs ~21 paired seeds — budget accordingly, or state plainly that the run was
-underpowered.
+**Six seeds paired, or five per arm unpaired — three is below the floor**, because
+a 3-vs-3 test cannot reach p=0.05 whatever the data. Report per-seed numbers, not
+just the mean (`--json` emits them). Prefer Mann-Whitney or paired Wilcoxon with
+an effect size and a bootstrap interval, and do not Bonferroni-correct — report
+every p-value you computed. The arithmetic, and the ~21 paired seeds a 0.02
+`inland_frac` shift actually needs: `docs/conventions.md` §5.
 
-Report the per-seed numbers, not just the mean; `--json` already emits them.
-Prefer Mann-Whitney (or paired Wilcoxon) with an effect size and a bootstrap
-interval over a bare mean, and do not Bonferroni-correct — report every p-value
-you computed instead.
-
-**Seeds vary the founders, not the world.** `terrain.build(cfg)` uses no RNG at
-all, so every seed runs on the *same map*. Any spatial claim (`inland_frac`,
-`water_bound_frac`, the distance metrics) therefore generalises to *this river
-system*, not to rivers in general — that is pseudoreplication, and the honest fix
-is to vary `ridge_wavenumber` / `ridge_amplitude` / `ridge_base_y` and the river
-sources across a terrain seed, then treat terrain and founders as crossed factors.
-Note a rigid translation is not enough: the world is a torus, so shifting the map
-changes nothing.
+**Seeds vary the founders, not the world.** `terrain.build(cfg)` uses no RNG, so
+every seed runs on the *same map*. Any spatial claim therefore generalises to
+*this river system*, not to rivers in general — that is pseudoreplication. Vary
+`ridge_wavenumber` / `ridge_amplitude` / `ridge_base_y` and the river sources
+across a terrain seed and cross the two factors (`docs/conventions.md` §6).
 
 **Spatial metrics need a null before they mean anything.** `inland_frac = 0.30` is
-not "low" until you know what random placement gives. Computed from the terrain
-alone: uniform over all cells → 0.556, over habitable cells → 0.675,
-capacity-weighted → 0.650. So the population sits ~0.35 *below* chance, which is
-the actual finding; and an effect of +0.020 is 5.8% of that gap, which is the
-honest way to size it.
+not "low" until you know that random placement gives 0.556–0.675 (computed from
+the terrain in `docs/conventions.md` §7). The population sits ~0.35 *below*
+chance — that is the finding, and it is what any effect size should be sized
+against.
 
-**`n_init` has a sweet spot that is narrow in both directions.** Seed near the
-equilibrium and the carnivore founder pool is too small to survive its own
-stochasticity; seed far above it and the initial die-off does the killing (a 7×
-crash wiped carnivores on every seed). Roughly 3× the expected equilibrium works.
+**Verify GPU and canvas output by looking at it.** A shader bug that rendered the
+plant field as a flat saturated slab shipped undetected for a long time because it
+was only ever reasoned about. Screenshots (headless chromium with
+`--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`) catch what
+code review does not.
 
-**Verify GPU and canvas output by looking at it.** A shader bug that made the plant field
-render as a flat saturated slab shipped undetected for a long time because it was only
-ever reasoned about. Screenshots (headless chromium with
-`--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`) catch what code
-review does not.
-
-**Determinism is not bit-exact on GPU.** Per-cell scatter-adds are atomic and reorder, so
-`test_determinism` asserts identical life/death structure plus value tolerance over a
-short horizon. For true bit-determinism run with
-`XLA_FLAGS=--xla_gpu_deterministic_ops=true`.
+**Determinism is not bit-exact on GPU.** Per-cell scatter-adds are atomic and
+reorder, so `test_determinism` asserts identical life/death structure plus value
+tolerance over a short horizon. For true bit-determinism run with
+`XLA_FLAGS=--xla_gpu_deterministic_ops=true`. Measured drift on the `check.py`
+smoke config is nevertheless 0.000% over five runs — see `docs/conventions.md` §9
+before touching the golden bands.
 
 **Dead code note:** `ecology.prey_field` and the sine-stream helpers are gone;
 `ecology.gradient` is live again as the terrain slope operator.
