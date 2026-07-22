@@ -20,3 +20,9 @@ wandb/
 .vscode/
 .idea/
 .DS_Store
+
+# Claude Code：hooks 与 settings.json 是项目配置，要进仓库；
+# worktrees 是整棵工作树的副本（2.7M），settings.local.json 是本机私有。
+.claude/worktrees/
+.claude/settings.local.json
+.playwright-mcp/

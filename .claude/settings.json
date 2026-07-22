@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/require-preallocate.sh",
+            "timeout": 10,
+            "statusMessage": "checking XLA_PYTHON_CLIENT_PREALLOCATE"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/contracts-after-edit.sh",
+            "timeout": 30,
+            "statusMessage": "checking cross-file contracts"
+          }
+        ]
+      }
+    ]
+  }
+}
