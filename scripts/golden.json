@@ -1,0 +1,21 @@
+{
+  "_comment": "Regenerate with `scripts/check.py --bless`. Do this only when a change is *meant* to move these numbers, and say so in the commit message.",
+  "config": {
+    "steps": 200,
+    "seed": 0,
+    "n_max": 2048,
+    "n_init": 400
+  },
+  "metrics": {
+    "population": 832.0,
+    "mean_energy": 10.162006378173828,
+    "mean_water": 5.638574600219727,
+    "mean_age": 114.82933044433594,
+    "plant_total": 15275.353515625,
+    "fruit_total": 76.68487548828125,
+    "mean_diet": 0.0940314307808876,
+    "carnivore_frac": 0.02163461595773697,
+    "mean_size": 0.9918103814125061,
+    "mean_invest": 0.48849907517433167
+  }
+}
