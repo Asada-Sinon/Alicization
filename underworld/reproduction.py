@@ -58,14 +58,20 @@ def cull(state: WorldState, water_damage: jax.Array, cfg: Config):
     Causes are made mutually exclusive by priority (predation > starvation >
     thirst > old age) so the four counts sum to the death toll and can be read
     as a partition.
+
+    `cfg.water_deficit_buffer` (docs/water_fix_buffer.md) lets `water` run
+    negative down to `-water_deficit_buffer` before it counts as dehydration --
+    real mammals tolerate a double-digit-percent water deficit before death, not
+    a hard zero. Default 0.0 makes this identical to the old `water <= 0.0`
+    test.
     """
     starved = state.energy <= 0.0
-    parched = state.water <= 0.0
+    parched = state.water <= -cfg.water_deficit_buffer
     aged = state.age > cfg.max_age
     died = state.alive & (starved | parched | aged)
 
     fatal_bite = (starved & (state.energy + state.last_damage > 0.0)) | \
-                 (parched & (state.water + water_damage > 0.0))
+                 (parched & (state.water + water_damage > -cfg.water_deficit_buffer))
     predation = died & fatal_bite
     starvation = died & starved & ~predation
     thirst = died & parched & ~predation & ~starvation
@@ -135,7 +141,14 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
     # Energy and water use the same fraction: provisioning is provisioning.
     invest_frac = invest_of(state.genome, cfg)[parent_idx]
     invest = state.energy[parent_idx] * invest_frac
-    water_invest = state.water[parent_idx] * invest_frac
+    # With `water_deficit_buffer > 0` a living parent's water can be negative
+    # (in deficit but not yet dead). Clamp to 0 before taking a fraction of it,
+    # or a deficit parent would hand a child *negative* starting water (born
+    # already dehydrated) while the parent's own water balance would rise --
+    # free water conjured from a negative number. At the default buffer=0,
+    # `alive` already implies `water > 0` (cull runs first each step), so this
+    # is a no-op there.
+    water_invest = jnp.maximum(state.water[parent_idx], 0.0) * invest_frac
     # A small-`size` child cannot hold more water than its own tank -- without
     # this, a large parent's absolute transfer could exceed a small-genotype
     # child's `water_max * size`, and the excess would simply vanish into
