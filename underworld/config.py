@@ -216,6 +216,30 @@ class Config:
     max_age: float = 3000.0        # steps before old age
     spawn_radius: float = 3.0      # child placed within this radius of parent
 
+    # Neonatal water floor, decoupled from `invest_frac` (docs/water_system.md
+    # SS2.3/3.3, arm_B: raising `invest_min` was measured to do almost nothing
+    # to death_thirst_frac, because it raises the SAME shared fraction that
+    # also sets the energy handover -- evolution absorbed the change without
+    # newborn hydration moving much, since the floor and the thing it floors
+    # were never independent). This floors the WATER fraction only:
+    # `water_frac = max(invest_frac, water_lactation_floor_frac)`, while
+    # `energy = parent_energy * invest_frac` stays untouched. Default 0.0 is a
+    # true no-op -- invest_frac is always >= invest_min > 0, so
+    # max(invest_frac, 0.0) == invest_frac and behaviour is bit-identical to
+    # before this field existed. Modelled on lactation, which is
+    # evolutionarily a channel separate from the quantity/quality dial that
+    # sets clutch/egg provisioning (Oftedal 2002, J Mammary Gland Biol
+    # Neoplasia 7:225-252 and 7:253-266) -- see
+    # docs/water_fix_provisioning.md for the design rationale and measured
+    # effect of turning this on. Not a gene: this is a Config constant, so
+    # evolution has no heritable variation in it to compress back toward
+    # invest_min, unlike raising invest_min itself. Sweep values should stay
+    # <= invest_min + invest_span (0.8 by default) so a parent never hands
+    # over more water than the existing gene's own upper bound would already
+    # permit -- this keeps the mechanism inside a region of state space the
+    # kernel already tolerates rather than opening an untested one.
+    water_lactation_floor_frac: float = 0.0
+
     # --- genetics ---
     mutation_sigma: float = 0.05      # gaussian noise on brain genes per birth
     diet_mutation_sigma: float = 0.015  # diet is strongly heritable (keeps types
