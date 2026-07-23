@@ -9,9 +9,10 @@
   const PICK_RADIUS = 6.0;       // world units
   const HIST = 600;              // samples kept per series (~20s at 30fps)
 
-  // Series colours. Locked to render.js's shader constants and validated as a
-  // set (all six dataviz checks pass on the --stone surface); if you change one
-  // here, change it in render.js and index.html's :root too.
+  // Series colours, validated as a set (all six dataviz checks pass on the
+  // --stone surface). herb/carn are the diet species colours locked to render.js's
+  // shader vec3 literals and index.html's :root -- change one, change all three
+  // (check.py --contracts enforces it). The rest are chart-only and live here.
   const C = {
     herb: "#9e52eb",
     carn: "#f24038",
