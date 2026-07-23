@@ -69,6 +69,20 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     # gathered -- no risk of needing candidates the 3x3 block never collected.
     own_cell = pos_to_cell(state.pos, cfg)
     vision = cfg.vision_radius * (1.0 - cfg.forest_occlusion * terrain.forest[own_cell])
+    # Day-night darkening (docs/day_night.md): at night an agent sees OTHER AGENTS
+    # (prey/pred/peer) less far -- the nocturnal-ambush lever. `light` is 0 at
+    # midnight, 1 at midday, read from the clock left by the previous step (the
+    # same step-start read as the fear fold below). This only shrinks `vision`
+    # (which feeds `closeness`); the water and food channels below use
+    # `cfg.vision_radius`/`plant_max` directly and stay at full range, so darkness
+    # never worsens water- or food-finding -- deliberately, to protect the
+    # juvenile-thirst bottleneck (landscape_of_fear §3.2). `day_length > 0` is a
+    # compile-time branch: when off this is absent from the trace and `state.phase`
+    # is identically 0 anyway, so it is a bit-exact no-op, same convention as fear.
+    if cfg.day_length > 0:
+        light = 0.5 * (1.0 - jnp.cos(2.0 * jnp.pi * state.phase))
+        vision = vision * (cfg.night_vision_floor
+                           + (1.0 - cfg.night_vision_floor) * light)
     closeness = jnp.clip(1.0 - dist / vision[:, None], 0.0, 1.0) * valid
 
     # Terrain line-of-sight (docs/three_d.md S5.1): a candidate otherwise inside

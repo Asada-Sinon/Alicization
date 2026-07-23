@@ -77,7 +77,13 @@ def build_step(cfg: Config, terrain):
         energy = dynamics.metabolize(
             energy, thrust, state.diet, climb, state.alive, cfg, size,
             attack_range, escape)
-        water = dynamics.thirst(water, thrust, state.alive, cfg, size)
+        # Day-night heat (docs/day_night.md): midday raises evaporative water loss.
+        # `light` is 0 at midnight, 1 at midday, read from the clock left by the
+        # previous step (same step-start read as the sensor darkening). Gated on
+        # day_length>0 so `thirst` gets None when off and is bit-exact the old call.
+        light = (0.5 * (1.0 - jnp.cos(2.0 * jnp.pi * state.phase))
+                 if cfg.day_length > 0 else None)
+        water = dynamics.thirst(water, thrust, state.alive, cfg, size, light)
         state = state._replace(
             energy=energy, water=water, age=state.age + state.alive,
             last_food=food_gain + fruit_gain, last_meat=meat_gain, last_damage=damage,
@@ -122,10 +128,21 @@ def build_step(cfg: Config, terrain):
             fear = jnp.clip(state.fear * cfg.fear_decay + carn_occ * cfg.fear_rate,
                             0.0, 1.0)
 
+        # 7a''. advance the day-night clock (docs/day_night.md) by one step's
+        # fraction of a full cycle, wrapped into [0, 1). Written here at step end
+        # and read at the *next* step's start (sensors.sense darkening, thirst
+        # heat), the same "deposit-then-read-next-step" idiom as trample/fear.
+        # `day_length > 0` is a compile-time branch: when off the clock never
+        # advances, phase stays at its 0 init, and both folds above are no-ops.
+        phase = state.phase
+        if cfg.day_length > 0:
+            phase = jnp.mod(state.phase + 1.0 / cfg.day_length, 1.0)
+
         # 7b. plants regrow; refresh the cached diet for the whole population
         state = state._replace(
             trample=trample,
             fear=fear,
+            phase=phase,
             plant=ecology.regrow(state.plant, effective_capacity, cfg.regrow_rate,
                                  cfg.regrow_baseline, cfg.plant_max),
             fruit=ecology.regrow(state.fruit, terrain.fruit_capacity,

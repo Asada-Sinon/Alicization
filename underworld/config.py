@@ -581,6 +581,52 @@ class Config:
     #                               not just the spatial metrics; at 3.0 it held.
     #                               Only read when fear_rate>0.
 
+    # --- day-night (diel) cycle (docs/day_night.md; the next step on the
+    # landscape-of-fear line). docs/landscape_of_fear.md §6 named the missing
+    # ingredient: the fear field made carnivores ROAM (carn_speed 1.5->2.4, 6/6,
+    # p=0.031) but could not make them LEAVE the riverbank (carn_water_dist +1.4,
+    # noisy) -- "water is a hard constraint, predators camp the water, and the
+    # public-information signal cannot push them off it without pushing prey into
+    # thirst death. What is really missing is DIEL COMMUTING (drink and leave),
+    # which this clockless world cannot give." So this adds a clock.
+    #
+    # Deliberately NOT a brain input: no sin/cos phase channel is fed in (that
+    # would hand evolution the answer). Instead a global `phase` scalar drives an
+    # environmental rhythm whose sensory *consequences* -- the retina dimming at
+    # night, own_water draining faster at midday -- are the zeitgebers a recurrent
+    # brain can entrain to. Whether 16 hidden units can evolve that internal clock
+    # is exactly the open question Phase 1 tests; if not, `hidden` grows (Phase 2).
+    #
+    # `day_length > 0` is a compile-time branch (cfg is closed over by build_step,
+    # not traced): at the default 0 the clock never advances, `phase` stays 0, and
+    # every downstream fold (sensor darkening, thirst heat) is absent from the jit
+    # -- bit-exact the pre-clock baseline, and NO shape changes anywhere, so no
+    # population is invalidated and golden holds. Same convention as `fear_rate=0`.
+    day_length: int = 0           # steps in one full day-night cycle; 0 disables
+    #                               (compile-time no-op, bit-exact old behaviour).
+    #                               Proposed 6-seed working value: 400. Timescale
+    #                               (docs/day_night.md): juvenile thirst death
+    #                               ~52 steps, fear/trample half-life ~69, memory
+    #                               half-life 346, max_age 3000 -- 400 gives adults
+    #                               ~7.5 cycles/life and sits well above the 69-step
+    #                               fear half-life so the rhythm is not smeared out;
+    #                               juveniles see under one cycle, so their thirst
+    #                               relief is indirect (via adult commuting).
+    heat_water_amp: float = 0.5   # relative rise in water cost at peak midday heat:
+    #                               thirst charges (1 + heat_water_amp*light)x, so
+    #                               midday is expensive to be active/away from water
+    #                               and the cool night is cheap -- the "drink at cool
+    #                               hours, don't linger midday" pressure. Read only
+    #                               when day_length>0.
+    night_vision_floor: float = 0.4  # inter-agent vision multiplier at midnight
+    #                               (1.0 = no darkening). Night shrinks how far an
+    #                               agent can SEE OTHER AGENTS (prey/pred/peer), the
+    #                               nocturnal-ambush lever; the water and food
+    #                               channels are deliberately left at full range so
+    #                               darkness never worsens water-finding -- the
+    #                               standing juvenile-thirst risk (landscape_of_fear
+    #                               §3.2). Read only when day_length>0.
+
     # --- rng ---
     seed: int = 0
 

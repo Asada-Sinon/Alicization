@@ -240,7 +240,7 @@ def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
 
 
 def thirst(water: jax.Array, thrust: jax.Array, alive: jax.Array,
-           cfg: Config, size: jax.Array) -> jax.Array:
+           cfg: Config, size: jax.Array, light: jax.Array | None = None) -> jax.Array:
     """Charge the per-step water cost of existing and moving (panting/sweating).
     Symmetric across diet -- both herbivores and carnivores need to visit the
     stream; carnivores get a bonus top-up from every successful kill instead.
@@ -248,7 +248,16 @@ def thirst(water: jax.Array, thrust: jax.Array, alive: jax.Array,
     Scales with `size` at 0.75, the same Kleiber exponent as `metabolize` --
     water loss, like energy loss, is metabolic/surface-area driven rather than a
     simple volume effect (that's `water_max` in `drink`, which scales at 1.0).
+
+    The day-night heat term (docs/day_night.md): midday heat raises evaporative
+    loss, so water cost is scaled by (1 + heat_water_amp*light) where `light` is
+    0 at midnight and 1 at midday. `light` is optional (default None) so the
+    pre-clock call signature and the thirst unit test still work unchanged; it is
+    only passed by `step.py` when `day_length > 0`, matching the compile-time
+    gating of `metabolize`'s red-queen taxes.
     """
     cost = (cfg.base_water_cost + cfg.move_water_cost * thrust)
+    if light is not None:
+        cost = cost * (1.0 + cfg.heat_water_amp * light)
     cost = cost * (size ** 0.75) * alive
     return water - cost

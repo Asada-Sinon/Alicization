@@ -322,6 +322,16 @@ def check_config_invariants(r: Report) -> None:
     r.expect(cfg.escape_index < cfg.genome_size,
              "trait gene indices are inside the genome",
              f"escape_index={cfg.escape_index}, genome_size={cfg.genome_size}")
+    # Day-night clock (docs/day_night.md): day_length=0 is the disabled default
+    # (compile-time no-op); a negative period is meaningless, and the night vision
+    # multiplier must stay a fraction so darkness only ever shrinks inter-agent
+    # sight, never extends it past the daytime radius.
+    r.expect(cfg.day_length >= 0,
+             f"day_length = {cfg.day_length} is non-negative (0 disables the clock)",
+             f"day_length={cfg.day_length} must be >= 0")
+    r.expect(0.0 <= cfg.night_vision_floor <= 1.0,
+             f"night_vision_floor = {cfg.night_vision_floor} is a fraction in [0, 1]",
+             f"night_vision_floor={cfg.night_vision_floor} must be in [0, 1]")
 
     sense_cell = cfg.world_size / cfg.sense_grid
     r.expect(sense_cell >= cfg.vision_radius,

@@ -80,6 +80,12 @@ class Metrics(NamedTuple):
     hunt_success: jax.Array     # fraction of carnivores that landed a bite this step --
     #                             the predation-success rate whose fall as prey escape
     #                             rises is the arms race's signature
+    # Day-night clock (docs/day_night.md): the global phase in [0, 1) at this step,
+    # 0/1 = midnight, 0.5 = midday. Stacked per-step by the scan so the diel
+    # commuting test can bin `carn_water_dist` into day-half vs night-half offline
+    # -- a static mean averages the two and would hide a perfect commute. Constant 0
+    # when day_length=0. Appended, never inserted (run_headless reads by name).
+    phase: jax.Array
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -178,4 +184,5 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         escape_std=jnp.sqrt(escape_var),
         herb_escape=herb_escape,
         hunt_success=hunt_success,
+        phase=state.phase,
     )

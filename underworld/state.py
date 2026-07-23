@@ -54,6 +54,16 @@ class WorldState(NamedTuple):
     #                                              ground. Default off (fear_rate=0):
     #                                              stays identically zero, so the fold is
     #                                              a no-op -- same convention as trample.
+    phase: jax.Array       # f32    scalar (0-d)  day-night clock in [0, 1): 0/1 = midnight,
+    #                                              0.5 = midday (docs/day_night.md). Advanced
+    #                                              by 1/day_length each step, wrapped mod 1;
+    #                                              read a step later (step-start) to drive the
+    #                                              retina-darkening and thirst-heat folds, the
+    #                                              same "deposit-then-read-next-step" idiom as
+    #                                              trample/fear. A *scalar* leaf: it changes no
+    #                                              [n_max]/genome shape, so founder RNG is
+    #                                              untouched and day_length=0 (never advanced)
+    #                                              reproduces the pre-clock baseline bit-exact.
 
 
 def diet_of(genome: jax.Array, cfg: Config) -> jax.Array:
@@ -190,6 +200,9 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         trample=jnp.zeros(cfg.n_cells),
         # No predator has lurked anywhere yet.
         fear=jnp.zeros(cfg.n_cells),
+        # The clock starts at midnight (phase 0). Stays here forever when
+        # day_length=0, so the diel folds are bit-exact no-ops.
+        phase=jnp.zeros(()),
     )
 
 
