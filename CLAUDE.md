@@ -279,6 +279,31 @@ checker holds all three in agreement, so add any new duplicated colour to
 the plant colour is now folded into the terrain shading and has no single
 literal to match.)
 
+## Session workflow and state files
+
+This repo carries a session workflow: `/kick` to open, `/plan` to research and plan,
+`/impl` to implement, `/validate` to check the work, `/handoff` to close out, `/exp` to
+run an experiment. `.claude/skills/` lists what is installed; usage lives in each skill.
+
+Three state files sit next to the existing docs, and the split is the point:
+
+- `HANDOFF.md` — the letter from the last session to the next: what was finished,
+  what the first action is now, which traps are live. Short and perishable.
+  `docs/TODO.md` stays the authority on the task queue and the document map (long
+  lived, "where is the argument"); `HANDOFF.md` only holds what has not settled yet.
+- `MEMORY.md` — `[LEARN:tag]` lessons, the lightweight buffer in front of
+  `docs/conventions.md`: a pitfall whose cause is understood but which does not yet earn
+  a full section of argument lands here, and graduates once measured. Never invent one.
+- `.context/current-focus.md` — the single thing being worked on, its done-criterion
+  and its explicit non-goals.
+
+Do not start a second parallel system: conclusions belong in `docs/`, rules in this
+file, the reasoning behind rules in `docs/conventions.md`.
+
+A `SessionStart` hook injects those three files plus the `docs/TODO.md` queue and the
+git state at every start, `/clear`, resume and compaction. A `Stop` hook runs
+`check.py --contracts` as a completion gate; `SKIP_VERIFY=1` skips it.
+
 ## Working on this codebase
 
 **Ecology parameters are empirically tuned, not arbitrary.** `config.py` carries

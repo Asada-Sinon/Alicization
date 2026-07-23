@@ -16,6 +16,10 @@ checkpoints/
 runs/
 wandb/
 
+# explorations/ 里的**脚本要进版本库**（docs/ 引用的数字得能追溯到算它的那段代码），
+# 只排除它们跑出来的东西 —— 那些重跑一遍就有。见 explorations/README.md。
+explorations/**/output/
+
 # 编辑器 / 系统
 .vscode/
 .idea/
@@ -25,4 +29,6 @@ wandb/
 # worktrees 是整棵工作树的副本（2.7M），settings.local.json 是本机私有。
 .claude/worktrees/
 .claude/settings.local.json
+# 个人版 CLAUDE.md 覆盖，只对自己生效；团队共享的是 CLAUDE.md 本身。
+CLAUDE.local.md
 .playwright-mcp/
