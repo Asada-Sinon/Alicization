@@ -10,7 +10,8 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import WorldState, invest_of, pos_to_cell, size_of
+from .state import (WorldState, attack_range_of, escape_of, invest_of,
+                    pos_to_cell, size_of)
 
 
 class Metrics(NamedTuple):
@@ -65,6 +66,20 @@ class Metrics(NamedTuple):
     # correlations share one estimator. Appended, never inserted.
     size_diet_corr: jax.Array   # do carnivores carry a different body size?
     size_invest_corr: jax.Array # is size allometrically tied to per-birth investment?
+    # Red-queen co-evolution (docs/attack_range_redqueen.md). The *lineage-split*
+    # means are the whole point: a real arms race shows attack climbing among
+    # carnivores AND escape climbing among herbivores, in step. Population means
+    # blur that, so `carn_attack`/`herb_escape` -- the functional carriers -- are
+    # reported alongside. Appended, never inserted (run_headless reads by name).
+    mean_attack: jax.Array      # population mean of the evolved attack-range gene
+    attack_std: jax.Array       # spread -- a live arms race keeps this from collapsing
+    carn_attack: jax.Array      # carnivore-lineage mean (diet > 0.65): the real reach
+    mean_escape: jax.Array      # population mean of the evolved escape gene
+    escape_std: jax.Array
+    herb_escape: jax.Array      # herbivore-lineage mean (diet < 0.35): the real evasion
+    hunt_success: jax.Array     # fraction of carnivores that landed a bite this step --
+    #                             the predation-success rate whose fall as prey escape
+    #                             rises is the arms race's signature
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -110,6 +125,19 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
     size_diet_corr = cov_sd / jnp.maximum(jnp.sqrt(size_var * diet_var), 1e-8)
     size_invest_corr = cov_si / jnp.maximum(jnp.sqrt(size_var * invest_var), 1e-8)
 
+    # Red-queen genes: population mean/spread plus the lineage that actually uses
+    # each (carnivores hunt, herbivores flee), computed with the same is_carn/is_herb
+    # masks as carn_speed/herb_speed.
+    attack = attack_range_of(state.genome, cfg)
+    escape = escape_of(state.genome, cfg)
+    mean_attack = jnp.sum(attack * alive) / denom
+    attack_var = jnp.sum(((attack - mean_attack) ** 2) * alive) / denom
+    mean_escape = jnp.sum(escape * alive) / denom
+    escape_var = jnp.sum(((escape - mean_escape) ** 2) * alive) / denom
+    carn_attack = jnp.sum(attack * is_carn) / carn_n
+    herb_escape = jnp.sum(escape * is_herb) / herb_n
+    hunt_success = jnp.sum((state.last_meat > 0.0) * is_carn) / carn_n
+
     return Metrics(
         population=pop,
         mean_energy=jnp.sum(state.energy * alive) / denom,
@@ -143,4 +171,11 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         size_std=jnp.sqrt(size_var),
         size_diet_corr=size_diet_corr,
         size_invest_corr=size_invest_corr,
+        mean_attack=mean_attack,
+        attack_std=jnp.sqrt(attack_var),
+        carn_attack=carn_attack,
+        mean_escape=mean_escape,
+        escape_std=jnp.sqrt(escape_var),
+        herb_escape=herb_escape,
+        hunt_success=hunt_success,
     )

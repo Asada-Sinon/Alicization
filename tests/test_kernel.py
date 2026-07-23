@@ -17,7 +17,8 @@ from underworld import Config, new_world
 from underworld import dynamics, memory, reproduction
 from underworld import genome as genome_mod
 from underworld import terrain as terrain_mod
-from underworld.state import init_state, invest_of, size_of
+from underworld.state import (attack_range_of, escape_of, init_state, invest_of,
+                              size_of)
 
 
 # Small, fast config for tests.
@@ -413,6 +414,102 @@ def test_size_gene_scales_metabolism_and_water_capacity():
     size = jnp.full((cfg.n_max,), big)
     capped, _ = dynamics.drink(st, terrain, cfg, size)
     assert float(jnp.max(capped)) == pytest.approx(cfg.water_max * big, rel=1e-4)
+
+
+def test_attack_and_escape_genes_neutral_start_and_bounds():
+    """The red-queen pair (docs/attack_range_redqueen.md) must start neutral so a
+    fresh population reproduces the pre-gene world: attack_range_of at gene 0 equals
+    the old `attack_range` constant (6.0), escape_of at gene 0 is exactly 0 (no
+    evasion). Both stay inside their declared ranges however extreme the gene."""
+    cfg = tiny_cfg()
+    wild = jnp.linspace(-50.0, 50.0, cfg.n_max)
+    g_atk = jnp.zeros((cfg.n_max, cfg.genome_size)).at[:, cfg.attack_index].set(wild)
+    atk = np.asarray(attack_range_of(g_atk, cfg))
+    assert atk.min() >= cfg.attack_min - 1e-6
+    assert atk.max() <= cfg.attack_max + 1e-6
+    neutral_atk = float(attack_range_of(jnp.zeros((1, cfg.genome_size)), cfg)[0])
+    assert neutral_atk == pytest.approx(cfg.attack_range, abs=1e-4)
+
+    g_esc = jnp.zeros((cfg.n_max, cfg.genome_size)).at[:, cfg.escape_index].set(wild)
+    esc = np.asarray(escape_of(g_esc, cfg))
+    assert esc.min() >= -1e-6
+    assert esc.max() <= cfg.escape_span * 0.5 + 1e-6
+    neutral_esc = float(escape_of(jnp.zeros((1, cfg.genome_size)), cfg)[0])
+    assert neutral_esc == pytest.approx(0.0, abs=1e-6)
+
+
+def test_red_queen_taxes_hit_energy_not_water():
+    """The attack/escape taxes MUST ride the energy ledger, never thirst
+    (docs/trait_roadmap.md §5): a water-ledger cost would recreate the body-size
+    gene's juvenile-thirst censoring. A big-reach carnivore and a high-escape
+    herbivore both lose extra *energy* in metabolize; neither loses extra water in
+    thirst."""
+    cfg = tiny_cfg()
+    alive = jnp.array([True, True])
+    thrust = jnp.array([0.5, 0.5])
+    climb = jnp.array([0.0, 0.0])
+    size = jnp.array([1.0, 1.0])
+    e0 = jnp.array([10.0, 10.0])
+
+    # A carnivore at max reach vs at the neutral baseline: extra energy only.
+    diet_c = jnp.array([1.0, 1.0])
+    reach_hi = jnp.array([cfg.attack_max, cfg.attack_max])
+    reach_base = jnp.array([cfg.attack_range, cfg.attack_range])
+    esc0 = jnp.array([0.0, 0.0])
+    e_hi = float(dynamics.metabolize(e0, thrust, diet_c, climb, alive, cfg, size,
+                                     reach_hi, esc0)[0])
+    e_base = float(dynamics.metabolize(e0, thrust, diet_c, climb, alive, cfg, size,
+                                       reach_base, esc0)[0])
+    assert e_base - e_hi == pytest.approx(
+        cfg.attack_cost * (cfg.attack_max - cfg.attack_range), rel=1e-4)
+
+    # A herbivore with high escape pays an energy tax scaled by (1-diet).
+    diet_h = jnp.array([0.0, 0.0])
+    esc_hi = jnp.array([5.0, 5.0])
+    e_esc = float(dynamics.metabolize(e0, thrust, diet_h, climb, alive, cfg, size,
+                                      reach_base, esc_hi)[0])
+    e_noesc = float(dynamics.metabolize(e0, thrust, diet_h, climb, alive, cfg, size,
+                                        reach_base, esc0)[0])
+    assert e_noesc - e_esc == pytest.approx(cfg.escape_cost * 5.0, rel=1e-4)
+
+    # Thirst must be untouched by either gene -- it takes neither argument.
+    w0 = jnp.array([10.0, 10.0])
+    w = dynamics.thirst(w0, thrust, alive, cfg, size)
+    assert float(w[0]) == pytest.approx(
+        10.0 - (cfg.base_water_cost + cfg.move_water_cost * 0.5) * (1.0 ** 0.75),
+        rel=1e-4)
+
+
+def test_prey_escape_shrinks_effective_attack_reach():
+    """A prey's escape gene shortens the attacker's *effective* reach: a bite that
+    lands on a zero-escape prey misses the same prey once it evolves enough evasion
+    (docs/attack_range_redqueen.md)."""
+    cfg = tiny_cfg(n_max=2, n_init=2)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+
+    # Agent 0 carnivore at neutral reach (6.0); agent 1 herbivore prey at dist 5.0.
+    genome = state.genome.at[:, cfg.attack_index].set(0.0)   # reach 6.0
+    genome = genome.at[0, cfg.diet_index].set(6.0)           # sigmoid -> ~1 carnivore
+    genome = genome.at[1, cfg.diet_index].set(-6.0)          # sigmoid -> ~0 herbivore
+    from underworld.state import diet_of
+    state = state._replace(
+        genome=genome, diet=diet_of(genome, cfg),
+        energy=jnp.array([10.0, 10.0]), water=jnp.array([10.0, 10.0]),
+        alive=jnp.array([True, True]))
+    nbr = jnp.array([[1], [0]])
+    dist = jnp.array([[5.0], [5.0]])
+    valid = jnp.array([[True], [True]])
+
+    # No evasion -> the bite lands.
+    st0 = state._replace(genome=state.genome.at[1, cfg.escape_index].set(0.0))
+    _, meat0, _, _, _, _ = dynamics.predation(st0, nbr, dist, valid, cfg)
+    assert float(meat0[0]) > 0.0
+
+    # High evasion (escape ~5.9, effective reach ~0.1) -> the same bite misses.
+    st1 = state._replace(genome=state.genome.at[1, cfg.escape_index].set(6.0))
+    _, meat1, _, _, _, _ = dynamics.predation(st1, nbr, dist, valid, cfg)
+    assert float(meat1[0]) == 0.0
 
 
 def test_child_water_investment_clamped_to_own_tank():

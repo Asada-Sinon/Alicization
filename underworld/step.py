@@ -14,7 +14,8 @@ from . import (brain, dynamics, ecology, memory, metrics, reproduction, sensors,
                spatial)
 from . import terrain as terrain_mod
 from .config import Config
-from .state import WorldState, diet_of, init_state, pos_to_cell, size_of
+from .state import (WorldState, attack_range_of, diet_of, escape_of, init_state,
+                    pos_to_cell, size_of)
 
 
 def build_step(cfg: Config, terrain):
@@ -69,8 +70,13 @@ def build_step(cfg: Config, terrain):
         _d2, dist2, valid2 = spatial.geometry(state, nbr2, cfg)
         energy, meat_gain, damage, water, meat_water_gain, water_damage = \
             dynamics.predation(state, nbr2, dist2, valid2, cfg)
+        # The red-queen taxes are levied on the ENERGY ledger in metabolize (never
+        # thirst); read the two genes per-agent here, same cheap recompute as `size`.
+        attack_range = attack_range_of(state.genome, cfg)
+        escape = escape_of(state.genome, cfg)
         energy = dynamics.metabolize(
-            energy, thrust, state.diet, climb, state.alive, cfg, size)
+            energy, thrust, state.diet, climb, state.alive, cfg, size,
+            attack_range, escape)
         water = dynamics.thirst(water, thrust, state.alive, cfg, size)
         state = state._replace(
             energy=energy, water=water, age=state.age + state.alive,

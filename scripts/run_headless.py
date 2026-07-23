@@ -65,8 +65,8 @@ def main(total_steps: int = 4000, chunk: int = 200, seed: int = 0,
 
     print(f"\n{'step':>7} {'pop':>7} {'energy':>8} {'water':>7} {'age':>7} "
           f"{'plant':>9} {'diet':>6} {'dietSD':>7} {'carn%':>6} "
-          f"{'carnV':>6} {'herbV':>6} {'hWD':>6} {'cWD':>6} {'wBnd':>6} "
-          f"{'inl':>6} {'steps/s':>9}")
+          f"{'carnV':>6} {'herbV':>6} {'hWD':>6} {'cWD':>6} "
+          f"{'cAtk':>6} {'hEsc':>6} {'hunt':>6} {'steps/s':>9}")
 
     def report(step, ms, dt):
         # ms fields are stacked over the chunk; show the last value. Read by
@@ -79,7 +79,8 @@ def main(total_steps: int = 4000, chunk: int = 200, seed: int = 0,
               f"{r['diet_std']:>7.3f} {100 * r['carnivore_frac']:>5.1f}% "
               f"{r['carn_speed']:>6.2f} {r['herb_speed']:>6.2f} "
               f"{r['herb_water_dist']:>6.1f} {r['carn_water_dist']:>6.1f} "
-              f"{r['water_bound_frac']:>6.2f} {r['inland_frac']:>6.2f} {sps:>9.0f}")
+              f"{r['carn_attack']:>6.2f} {r['herb_escape']:>6.2f} "
+              f"{r['hunt_success']:>6.2f} {sps:>9.0f}")
         return r
 
     # Death counts are per-step and must be *summed* over the whole run, not

@@ -32,6 +32,12 @@ def mutate(genome: jax.Array, key: jax.Array, cfg: Config) -> jax.Array:
     sigma = sigma.at[cfg.diet_index].set(diet_sigma)
     sigma = sigma.at[cfg.invest_index].set(cfg.invest_mutation_sigma)
     sigma = sigma.at[cfg.size_index].set(cfg.size_mutation_sigma)
+    # The red-queen pair (docs/attack_range_redqueen.md): attack reach and prey
+    # escape drift at the same slow trait-gene rate as size/invest -- a body the
+    # brain cannot track is worse than one that changes slowly, and these two feed
+    # straight into predation, the tightest coupling in the sim.
+    sigma = sigma.at[cfg.attack_index].set(cfg.attack_mutation_sigma)
+    sigma = sigma.at[cfg.escape_index].set(cfg.escape_mutation_sigma)
     return genome + jax.random.normal(key, genome.shape) * sigma
 
 

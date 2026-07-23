@@ -51,8 +51,14 @@ class Config:
     retina_sectors: int = 8        # directional vision resolution
     hidden: int = 16               # recurrent hidden units (the fluctlight's memory)
     out_dim: int = 2               # [turn, thrust]
-    trait_dim: int = 3             # non-brain genes; [0] = diet, [1] = investment,
-    #                                 [2] = size
+    trait_dim: int = 5             # non-brain genes; [0] = diet, [1] = investment,
+    #                                 [2] = size, [3] = attack_range (predator reach),
+    #                                 [4] = escape (prey evasion). The last two are the
+    #                                 co-evolving pair of the red-queen experiment
+    #                                 (docs/attack_range_redqueen.md): a predator's attack
+    #                                 gene and a prey's escape gene chase each other up.
+    #                                 Both cost energy, never water (docs/trait_roadmap.md
+    #                                 §5) -- see `attack_cost`/`escape_cost` below.
     genome_init_scale: float = 0.4
     food_sample_dist: float = 9.0  # how far ahead each sector samples the plant field
 
@@ -95,6 +101,54 @@ class Config:
     #                                 *water* (as energy damage), transferred to
     #                                 the attacker at the same pred_efficiency --
     #                                 a kill hydrates as well as feeds.
+
+    # --- red-queen co-evolution: heritable attack range vs prey escape ---
+    # (docs/attack_range_redqueen.md, docs/trait_roadmap.md §7.3). The predator's
+    # attack gene lengthens its bite reach; the prey's escape gene shortens the
+    # attacker's *effective* reach against it. Each side pays an ENERGY tax for its
+    # investment -- never a water tax, which would drag the trait into the juvenile-
+    # thirst death-censoring trap that killed the body-size gene (§5 of the roadmap).
+    # The tax is modelled on `carn_cost` (energy ledger, diet-scaled), the one
+    # standing precedent proven safe against that trap.
+    attack_min: float = 1.0        # attack_range_of maps the gene to
+    attack_span: float = 10.0      #   [attack_min, attack_min+attack_span] = [1, 11];
+    #                                a gene of 0 sigmoids to 0.5 -> 1 + 0.5*10 = 6.0 =
+    #                                the pre-gene `attack_range` constant, so a fresh
+    #                                population starts exactly at the old behaviour and
+    #                                drifts from there. Upper bound 11 stays well under
+    #                                the sense cell (world_size/sense_grid = 21.3): a
+    #                                bite beyond that reaches prey the neighbour table
+    #                                never gathered and would fail silently. Guarded by
+    #                                check_config_invariants.
+    attack_cost: float = 0.012     # energy/step per world-unit of reach ABOVE the 6.0
+    #                                baseline, scaled by diet like carn_cost so
+    #                                herbivores (who almost never clear the diet_delta
+    #                                predation gate) pay ~0 and their attack gene drifts
+    #                                neutrally. Tuned by short probe (docs/
+    #                                attack_range_redqueen.md): heavy enough that reach
+    #                                does not just peg at the 11 ceiling, light enough
+    #                                that carnivores are not driven extinct.
+    attack_mutation_sigma: float = 0.02  # same slow rate as size/invest trait genes.
+    escape_span: float = 12.0      # escape_of maps the gene to [0, escape_span/2] = [0,6]
+    #                                world units shaved off an attacker's effective reach.
+    #                                Neutral (gene 0) = 0 EXACTLY (unlike attack's 6.0):
+    #                                a fresh population has no evasion, so any escape is
+    #                                evolved, not seeded -- the clean red-queen baseline.
+    escape_cost: float = 0.012     # energy/step per world-unit of evasion, scaled by
+    #                                (1-diet) so herbivores (the hunted) pay and
+    #                                carnivores' escape gene drifts neutrally. Symmetric
+    #                                to attack_cost.
+    escape_mutation_sigma: float = 0.02
+    attack_range_heritable: bool = True  # False: predation reads the fixed
+    #                                `cfg.attack_range` constant; the attack gene still
+    #                                exists, drifts and is reported, but has no functional
+    #                                effect and levies no tax -- the clean control arm,
+    #                                genome-compatible with the True arm (same layout).
+    prey_escape_enabled: bool = True     # False: the escape gene has no effect on
+    #                                predation and no tax -- the *unilateral* arm (only
+    #                                the predator's reach evolves), used to tell a true
+    #                                red-queen (both traits climb) from one-sided
+    #                                optimisation (reach drifts up until its tax bites).
 
     # --- terrain: one elevation field drives mountains, rivers and forest ---
     # h(x,y) = H_local(x) * exp(-d_ridge^2 / 2*sigma^2)          <- the range
@@ -556,6 +610,25 @@ class Config:
         """Column holding the body-size gene. Appended after investment for the
         same reason investment was appended after diet."""
         return self.brain_params + 2
+
+    @property
+    def attack_index(self) -> int:
+        """Column holding the heritable attack-range gene (predator reach). Appended
+        after size -- adding it leaves every brain weight and prior trait at the same
+        offset, growing `genome_size` by one."""
+        return self.brain_params + 3
+
+    @property
+    def escape_index(self) -> int:
+        """Column holding the prey escape gene, the red-queen counterpart to attack."""
+        return self.brain_params + 4
+
+    @property
+    def attack_max(self) -> float:
+        """Largest evolvable attack range. Must stay under the sense cell size or a
+        bite could reach prey the neighbour table never gathered (guarded in
+        check_config_invariants)."""
+        return self.attack_min + self.attack_span
 
     @property
     def genome_size(self) -> int:
