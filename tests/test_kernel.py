@@ -1106,3 +1106,322 @@ def test_reproduce_does_not_conjure_water_from_a_deficit_parent():
     # The parent's own water must not have gone *up* from "investing" a
     # negative fraction of a negative balance.
     assert float(child.water[0]) <= float(state.water[0]) + 1e-4
+
+
+# ---------------------------------------------------------------------------
+# Coverage-gap tests (test_coverage_audit.md). Everything below was added to
+# close holes the existing suite left open: the red-queen ablation flags'
+# no-op equivalence, the spatial neighbour index's silent overflow/dead-agent
+# dropping, the reproduction permutation-scatter's conservation invariants,
+# the memory partition boundary, predation target selection, and the trait
+# genome layout. Unit-level and deterministic (no scatter-add reordering), so
+# they assert exact equality where the whole-sim tests can only assert bands.
+# ---------------------------------------------------------------------------
+
+
+def _two_agent_predation_state(cfg, dist=5.0, prey_escape_gene=0.0):
+    """A carnivore (agent 0) and a herbivore prey (agent 1) `dist` apart, both
+    at neutral attack reach (attack gene 0 -> 6.0). Shared setup for the
+    predation-reach tests below."""
+    from underworld.state import diet_of
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+    genome = state.genome.at[:, cfg.attack_index].set(0.0)      # reach 6.0
+    genome = genome.at[0, cfg.diet_index].set(6.0)             # carnivore
+    genome = genome.at[1, cfg.diet_index].set(-6.0)            # herbivore prey
+    genome = genome.at[1, cfg.escape_index].set(prey_escape_gene)
+    state = state._replace(
+        genome=genome, diet=diet_of(genome, cfg),
+        energy=jnp.array([10.0, 10.0]), water=jnp.array([10.0, 10.0]),
+        alive=jnp.array([True, True]))
+    nbr = jnp.array([[1], [0]])
+    d = jnp.array([[dist], [dist]])
+    valid = jnp.array([[True], [True]])
+    return state, nbr, d, valid
+
+
+def test_attack_flag_off_reproduces_neutral_gene_predation():
+    """`attack_range_heritable`/`prey_escape_enabled` are compile-time ablation
+    flags. Their whole contract is that a *neutral* genome under the flags-on
+    world (attack gene 0 -> reach 6.0, escape gene 0 -> 0) is bit-for-bit the
+    flags-off world (fixed `cfg.attack_range`, no escape term). If it were not,
+    every ablation arm would silently be measuring a different baseline, not the
+    same world with the mechanism switched out. Checked directly on `predation`,
+    whose branch on the flags is exactly what this guards."""
+    cfg_on = tiny_cfg(n_max=2, n_init=2)
+    cfg_off = tiny_cfg(n_max=2, n_init=2, attack_range_heritable=False,
+                       prey_escape_enabled=False)
+    # Genome-compatible: the flags never touch trait_dim/genome_size.
+    assert cfg_on.genome_size == cfg_off.genome_size
+    state, nbr, d, valid = _two_agent_predation_state(cfg_on, dist=5.0)
+
+    out_on = dynamics.predation(state, nbr, d, valid, cfg_on)
+    out_off = dynamics.predation(state, nbr, d, valid, cfg_off)
+    for a, b in zip(out_on, out_off):
+        assert bool(jnp.allclose(a, b, atol=1e-6)), "ablation arm moved the baseline"
+    # ...and the bite must actually have landed, or the equivalence is vacuous.
+    assert float(out_on[1][0]) > 0.0, "neutral carnivore should bite prey at dist 5 < 6"
+
+
+def test_metabolize_flags_off_ignore_reach_and_escape_args():
+    """With both red-queen flags off, `metabolize` must levy zero attack/escape
+    tax however extreme the reach/escape passed in -- the off-branch compiles the
+    tax away. This is the metabolize half of the ablation contract, complementing
+    the predation half above."""
+    cfg = tiny_cfg(attack_range_heritable=False, prey_escape_enabled=False)
+    e0 = jnp.array([10.0, 10.0])
+    thrust = jnp.array([0.5, 0.5])
+    diet = jnp.array([1.0, 0.0])
+    climb = jnp.array([0.0, 0.0])
+    alive = jnp.array([True, True])
+    size = jnp.array([1.0, 1.0])
+
+    base = dynamics.metabolize(e0, thrust, diet, climb, alive, cfg, size)
+    taxed = dynamics.metabolize(e0, thrust, diet, climb, alive, cfg, size,
+                                jnp.array([1e3, 1e3]), jnp.array([1e3, 1e3]))
+    assert bool(jnp.allclose(base, taxed, atol=1e-6)), \
+        "flags-off metabolize must ignore the reach/escape arguments entirely"
+
+
+def test_prey_escape_effective_reach_is_attack_minus_escape():
+    """The red-queen arithmetic itself: a bite lands iff `dist < attack - escape`.
+    With the attacker at neutral reach (6.0) and a prey carrying a known escape
+    gene, the crossover distance must sit exactly at `6.0 - escape_of(prey)` --
+    hit just inside it, miss just outside. `test_prey_escape_shrinks_effective_
+    attack_reach` only checks the two extremes; this pins the boundary to the
+    subtraction."""
+    cfg = tiny_cfg(n_max=2, n_init=2)
+    esc = float(escape_of(
+        jnp.zeros((1, cfg.genome_size)).at[:, cfg.escape_index].set(1.0), cfg)[0])
+    assert esc > 0.5, "test needs a prey escape big enough to move the boundary"
+    effective = cfg.attack_range - esc
+
+    st_in, nbr, _d, valid = _two_agent_predation_state(
+        cfg, dist=effective - 0.15, prey_escape_gene=1.0)
+    d_in = jnp.array([[effective - 0.15], [effective - 0.15]])
+    _, meat_in, _, _, _, _ = dynamics.predation(st_in, nbr, d_in, valid, cfg)
+    assert float(meat_in[0]) > 0.0, "bite just inside the effective reach must land"
+
+    d_out = jnp.array([[effective + 0.15], [effective + 0.15]])
+    _, meat_out, _, _, _, _ = dynamics.predation(st_in, nbr, d_out, valid, cfg)
+    assert float(meat_out[0]) == 0.0, "bite just outside the effective reach must miss"
+
+
+def test_predation_hits_nearest_eligible_prey_only():
+    """Each attacker bites the *nearest eligible* prey among its neighbours, not
+    all of them (docs: `argmin` over eligible distances). A carnivore with two
+    herbivore neighbours inside reach must damage only the closer one."""
+    from underworld.state import diet_of
+    cfg = tiny_cfg(n_max=3, n_init=3)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+    genome = state.genome.at[:, cfg.attack_index].set(0.0)     # reach 6.0
+    genome = genome.at[0, cfg.diet_index].set(6.0)            # carnivore
+    genome = genome.at[1, cfg.diet_index].set(-6.0)           # herbivore
+    genome = genome.at[2, cfg.diet_index].set(-6.0)           # herbivore
+    state = state._replace(
+        genome=genome, diet=diet_of(genome, cfg),
+        energy=jnp.full(3, 10.0), water=jnp.full(3, 10.0),
+        alive=jnp.ones(3, dtype=bool))
+    # Agent 0 sees prey 1 at dist 3 and prey 2 at dist 5 (both < reach 6).
+    nbr = jnp.array([[1, 2], [0, 0], [0, 0]])
+    dist = jnp.array([[3.0, 5.0], [3.0, 3.0], [5.0, 5.0]])
+    valid = jnp.array([[True, True], [True, False], [True, False]])
+
+    _e, meat, damage, _w, _wg, _wd = dynamics.predation(state, nbr, dist, valid, cfg)
+    assert float(damage[1]) > 0.0, "the nearer prey must be bitten"
+    assert float(damage[2]) == 0.0, "the farther prey must be untouched (only nearest)"
+    assert float(meat[0]) > 0.0
+
+
+def test_predation_respects_diet_delta_threshold():
+    """A neighbour is prey only if it is *strictly more* than `diet_delta` more
+    herbivorous. A neighbour whose diet gap sits just under the threshold is not
+    eligible and takes no damage -- the guard that stops near-identical diets
+    (conspecifics) from eating each other."""
+    cfg = tiny_cfg(n_max=2, n_init=2)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+    # Diets differ by less than diet_delta: agent 0 is the (weak) attacker.
+    diet = jnp.array([0.5, 0.5 - cfg.diet_delta * 0.5])
+    state = state._replace(
+        diet=diet, energy=jnp.array([10.0, 10.0]), water=jnp.array([10.0, 10.0]),
+        genome=state.genome.at[:, cfg.attack_index].set(0.0),
+        alive=jnp.array([True, True]))
+    nbr = jnp.array([[1], [0]])
+    dist = jnp.array([[3.0], [3.0]])
+    valid = jnp.array([[True], [True]])
+    _e, meat, damage, _w, _wg, _wd = dynamics.predation(state, nbr, dist, valid, cfg)
+    assert float(damage[1]) == 0.0, "sub-threshold diet gap must not be edible"
+    assert float(meat[0]) == 0.0
+
+
+def test_neighbor_table_drops_overflow_beyond_k():
+    """A cell holding more than `k_neighbors` agents keeps only K of them; the
+    overflow lands in the dump column that `build_table` slices off, so those
+    agents become invisible to both vision and predation (CLAUDE.md: 'overflow
+    beyond k_neighbors ... silently dropped'). Regression guard: pile K+4 agents
+    into one cell and assert exactly K distinct indices survive in the table."""
+    from underworld import spatial
+    K = 8
+    cfg = tiny_cfg(n_max=64, n_init=64, sense_grid=4, k_neighbors=K)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain_mod.build(cfg))
+    n_here = K + 4
+    # First n_here agents share one exact position (one cell); the rest are dead.
+    spot = jnp.array([10.0, 10.0])
+    pos = jnp.where((jnp.arange(cfg.n_max) < n_here)[:, None], spot, state.pos)
+    state = state._replace(pos=pos, alive=jnp.arange(cfg.n_max) < n_here)
+
+    table = np.asarray(spatial.build_table(state, cfg))
+    survivors = set(int(v) for v in np.unique(table) if v >= 0)
+    assert len(survivors) == K, f"expected {K} survivors, got {len(survivors)}"
+    assert survivors == set(range(K)), "the first K by cell-rank must be the ones kept"
+
+
+def test_neighbor_table_excludes_the_dead():
+    """Dead agents are routed to a dump *row* (`n_sense_cells`) that `build_table`
+    slices off, so a corpse never surfaces as anyone's neighbour -- the other half
+    of the silent-drop contract from `test_neighbor_table_drops_overflow_beyond_k`."""
+    from underworld import spatial
+    cfg = tiny_cfg(n_max=32, n_init=32, sense_grid=4, k_neighbors=8)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain_mod.build(cfg))
+    # Only agents 0 and 1 alive, co-located; everyone else dead but positioned
+    # on top of them (so it is aliveness, not distance, that must exclude them).
+    spot = jnp.array([10.0, 10.0])
+    pos = jnp.tile(spot, (cfg.n_max, 1))
+    state = state._replace(pos=pos, alive=jnp.arange(cfg.n_max) < 2)
+
+    table = np.asarray(spatial.build_table(state, cfg))
+    survivors = set(int(v) for v in np.unique(table) if v >= 0)
+    assert survivors == {0, 1}, f"dead agents leaked into the table: {survivors}"
+
+
+def test_reproduce_conserves_energy_and_writes_each_slot_once():
+    """The permutation-scatter's core invariants (CLAUDE.md 'writes each index
+    exactly once'):
+
+      * births equal `min(wanters, free)`; no living agent is ever culled by
+        reproduce (it only ever adds alive bits);
+      * newborns land only in previously-free slots;
+      * living non-parents are byte-for-byte untouched (the no-op write-back);
+      * total energy is *conserved* -- a parent pays exactly what its child
+        receives, so the sum over the whole array is unchanged.
+    """
+    cfg = tiny_cfg(n_max=64, n_init=8)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain_mod.build(cfg))
+    # Agents 0..4 are rich breeders; 5..7 alive but too poor to want; rest dead.
+    idx = jnp.arange(cfg.n_max)
+    energy = jnp.where(idx < 5, cfg.repro_threshold + 5.0,
+                       jnp.where(idx < 8, 1.0, 0.0))
+    state = state._replace(alive=idx < 8, energy=energy)
+    want = int(jnp.sum(state.alive & (state.energy > cfg.repro_threshold)))
+    assert want == 5
+
+    e_before = float(jnp.sum(state.energy))
+    child = reproduction.reproduce(state, jax.random.PRNGKey(1), cfg)
+
+    born = np.asarray(child.alive & ~state.alive)
+    assert int(born.sum()) == 5, "births must equal min(wanters, free)"
+    assert bool(jnp.all(child.alive[:8])), "reproduce must never cull a living agent"
+    assert int(jnp.sum(child.alive)) == 13
+    assert np.all(np.flatnonzero(born) >= 8), "newborns must occupy only free slots"
+    # Living non-parents (5,6,7) must be untouched by the scatter.
+    assert np.allclose(np.asarray(child.energy[5:8]), 1.0)
+    # Energy is conserved: parents' investment == childrens' endowment, exactly.
+    assert float(jnp.sum(child.energy)) == pytest.approx(e_before, rel=1e-5)
+
+
+def test_reproduce_bounded_by_free_slots_not_wanters():
+    """When would-be parents outnumber free slots, only `free`-many births
+    happen and not one living agent is overwritten -- the `n_birth = min(...)`
+    clamp that keeps the fixed-shape array from overflowing."""
+    cfg = tiny_cfg(n_max=8, n_init=6)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain_mod.build(cfg))
+    # 6 alive, all rich (all want); only 2 free slots.
+    state = state._replace(
+        alive=jnp.arange(8) < 6,
+        energy=jnp.where(jnp.arange(8) < 6, cfg.repro_threshold + 5.0, 0.0))
+    child = reproduction.reproduce(state, jax.random.PRNGKey(1), cfg)
+    born = int(jnp.sum(child.alive & ~state.alive))
+    assert born == 2, f"only 2 free slots -> 2 births, got {born}"
+    assert bool(jnp.all(child.alive[:6])), "no living parent may be overwritten"
+    assert int(jnp.sum(child.alive)) == 8
+
+
+def test_memory_write_respects_partition_boundary():
+    """Slots are partitioned by position: `[0, water_slots)` water, the rest
+    fruit. A fruit write must never disturb a water slot, and vice versa --
+    otherwise a fruit sighting would clobber a remembered river. Complements
+    `test_memory_write_replaces_exactly_one_slot`, which only exercised the
+    water partition."""
+    cfg = tiny_cfg()
+    n = 6
+    w, k = cfg.memory_water_slots, cfg.memory_slots
+    assert 0 < w < k, "test assumes both partitions are non-empty"
+    # Every slot occupied; the last fruit slot is the weakest fruit slot.
+    mem = jnp.tile(jnp.array([3.0, 4.0, 0.9]), (n, k, 1))
+    mem = mem.at[:, k - 1, 2].set(0.1)
+    should = jnp.arange(n) < 3
+
+    out = memory.write(mem, w, k, should, cfg)          # write into the FRUIT range
+    changed = np.asarray(jnp.any(out != mem, axis=2))   # [n, k]
+    # Water slots [0, w) untouched for absolutely everyone.
+    assert not changed[:, :w].any(), "a fruit write leaked into the water partition"
+    # Writers changed exactly one fruit slot (the weakest, k-1); others none.
+    assert np.all(changed[:3, w:].sum(axis=1) == 1)
+    assert np.all(changed[:3, k - 1]), "the weakest fruit slot should be replaced"
+    assert not changed[3:].any(), "non-writers must be untouched"
+
+
+def test_memory_encode_bearing_is_egocentric():
+    """`encode` reports each slot's bearing *relative to the agent's heading*, the
+    same egocentric convention the retina uses. A slot lying straight ahead of an
+    agent -- whatever its absolute compass direction -- must encode as sin~0,
+    cos~1; one directly behind as sin~0, cos~-1."""
+    cfg = tiny_cfg()
+    k = cfg.memory_slots
+    heading = jnp.array([0.5, 2.3])                     # two arbitrary headings
+    # Slot 0 points exactly along each agent's own heading (dead ahead).
+    ahead = jnp.stack([jnp.cos(heading), jnp.sin(heading)], axis=1) * 20.0
+    mem = jnp.zeros((2, k, 3))
+    mem = mem.at[:, 0, :2].set(ahead).at[:, 0, 2].set(1.0)
+    feats = np.asarray(memory.encode(mem, heading, cfg))  # [2, 4k]
+    # slot 0 layout: [sin(bearing), cos(bearing), tanh(dist), strength]
+    for a in range(2):
+        assert feats[a, 0] == pytest.approx(0.0, abs=1e-5), "dead-ahead sin ~ 0"
+        assert feats[a, 1] == pytest.approx(1.0, abs=1e-5), "dead-ahead cos ~ 1"
+
+
+def test_ecology_regrow_clips_and_recovers():
+    """`regrow` invariants isolated from the full sim: it clips a field above its
+    per-cell capacity back down, a zero-capacity cell stays exactly zero (the
+    0/0 baseline guard that the `fruit_max=0` ablation depends on), and a
+    grazed-out cell with positive capacity recovers via the spontaneous
+    baseline even though the logistic term is zero there."""
+    from underworld import ecology
+    cap = jnp.array([5.0, 0.0, 5.0])
+    field = jnp.array([9.0, 0.0, 0.0])                  # over-cap, dead-cell, grazed-out
+    out = np.asarray(ecology.regrow(field, cap, 0.06, 0.02, 5.0))
+    assert np.all(np.isfinite(out))
+    assert out[0] <= 5.0 + 1e-6, "a field above capacity must be clipped down"
+    assert out[1] == 0.0, "a zero-capacity cell must stay exactly zero (0/0 guard)"
+    assert out[2] > 0.0, "a grazed-out cell with capacity must recover via baseline"
+    assert out[2] <= 5.0 + 1e-6
+
+
+def test_trait_gene_indices_are_distinct_and_in_range():
+    """The five trait genes are appended after the brain block at fixed offsets;
+    a collision (two traits sharing a column) or an out-of-range index would let
+    one gene silently overwrite another with no test firing anywhere. Guards the
+    genome layout the whole trait-evolution programme rests on."""
+    cfg = Config()
+    idxs = [cfg.diet_index, cfg.invest_index, cfg.size_index,
+            cfg.attack_index, cfg.escape_index]
+    assert len(set(idxs)) == len(idxs), "trait gene indices collide"
+    assert min(idxs) == cfg.brain_params, "traits must start right after the brain block"
+    assert max(idxs) < cfg.genome_size, "a trait index falls outside the genome"
+    assert cfg.genome_size == cfg.brain_params + cfg.trait_dim
+    assert len(idxs) == cfg.trait_dim, "trait_dim disagrees with the number of trait genes"
+    # in_dim must match the documented channel formula (5 retina + 3 scalars +
+    # 4/slot memory + 1 peer retina channel).
+    assert cfg.in_dim == 6 * cfg.retina_sectors + 3 + 4 * cfg.memory_slots

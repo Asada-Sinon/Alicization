@@ -24,6 +24,7 @@
 | `docs/water_fix_decision.md` | **三候选水修复对比与选型判决（已落地）。** buffer/provisioning/retune 对着用户三条判据选型，只有 retune 全过。**已实现为 main 默认值**（`543483a`）：base/move_water_cost 减半 + carn_cost 0.15。实测 thirst 83%→55%、捕食者离水 11.4→25.3、carn_frac 稳在 22% | 想知道水系统为什么这么调、或要再动水参数时（先读它的"窄工作点"警告） |
 | `docs/web_cleanup_audit.md` | **`web/` 前端清理审计（行为/视觉零变化）。** 无死代码；落地两类性能点（`render.js` 缓存 GL location + 采样器只绑一次、`main.js` 缓存每帧 DOM 元素）与两处过期注释（`--plant`、`C` 颜色块）。cross-file 契约全程未碰，`--contracts` 21 项全过，render 改动按 §10 截图验过 | 要动 `web/` 前端、或想知道哪些清理已做过时 |
 | `docs/water_system.md` | **水系统经济学审计——本轮调研的收敛点。** 用户"水消耗太快"假设的判决（成体不成立、幼体方向对但机制是"出生只给 21% 满箱"）；5 臂消融证明**水是那个总闸门**——调水经济第一次真的把捕食者赶离水（`carn_water_dist` 10.8→34.3）且大降渴死，但每个有效杠杆都让种群涨 27-72%、捕食者占比升到 33-41% | 讨论幼体渴死瓶颈、水参数、或"改一处能不能松动多条线"时 |
+| `docs/test_coverage_audit.md` | **测试覆盖审计 + 13 个新单元测试。** 补上六处沉默缺口：红皇后消融开关 no-op 等价性、有效射程=attack−escape 边界、捕食最近猎物+diet_delta 阈值、spatial 邻居索引溢出/死者沉默丢弃、生育 permutation-scatter 能量守恒、记忆分区边界。未发现被测代码 bug | 想加测试、动 `predation`/`reproduce`/`spatial`/消融开关、或问"这条不变量有没有守护"时 |
 
 ## 硬约束（每次动手前确认）
 
