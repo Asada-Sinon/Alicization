@@ -12,6 +12,15 @@ from .config import Config
 from .state import WorldState, attack_range_of, escape_of, pos_to_cell
 
 
+def _herbivory(diet: jax.Array, cfg: Config) -> jax.Array:
+    """Grazing skill as a function of diet, shared by `graze` and `eat_fruit` so
+    the plant and fruit layers taper identically. The rationale for the taper's
+    shape -- the steep `(1-diet)^6` and the hard `carn_graze_cutoff` -- lives on
+    the call site in `graze`.
+    """
+    return jnp.where(diet > cfg.carn_graze_cutoff, 0.0, (1.0 - diet) ** 6)
+
+
 def act(state: WorldState, outputs: jax.Array, terrain, cfg: Config):
     """Apply brain outputs. Returns (new_state, thrust, climb) where thrust is in
     [0, 1] and `climb` is the elevation *gained* this step (>= 0), which
@@ -73,9 +82,7 @@ def graze(state: WorldState, cfg: Config):
     # hard-zeroed -- true carnivores must hunt or starve, no plant fallback at
     # all. This both enforces a herbivore-majority pyramid and damps the
     # predator-prey oscillation.
-    herbivory = jnp.where(
-        state.diet > cfg.carn_graze_cutoff, 0.0, (1.0 - state.diet) ** 6
-    )
+    herbivory = _herbivory(state.diet, cfg)
     demand = cfg.eat_rate * herbivory * state.alive            # [n_max]
 
     demand_per_cell = jnp.zeros(cfg.n_cells).at[cell].add(demand)
@@ -97,9 +104,7 @@ def eat_fruit(state: WorldState, cfg: Config):
     same rate as grass; it is plant tissue either way.
     """
     cell = pos_to_cell(state.pos, cfg)
-    herbivory = jnp.where(
-        state.diet > cfg.carn_graze_cutoff, 0.0, (1.0 - state.diet) ** 6
-    )
+    herbivory = _herbivory(state.diet, cfg)
     demand = cfg.fruit_eat_rate * herbivory * state.alive
 
     demand_per_cell = jnp.zeros(cfg.n_cells).at[cell].add(demand)

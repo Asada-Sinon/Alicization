@@ -46,8 +46,10 @@ from .state import WorldState, pos_to_cell
 def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
           valid: jax.Array, terrain, cfg: Config) -> jax.Array:
     """Build brain inputs [n_max, in_dim] = [food(R), prey(R), predator(R),
-    water(R), slope(R), energy, diet, own_water].  nbr/delta/dist/valid come from
-    spatial.geometry.
+    water(R), slope(R), energy, diet, own_water, memory(4*slots), peer(R)].
+    nbr/delta/dist/valid come from spatial.geometry. Memory and peer are appended
+    last rather than interleaved so the retina slice offsets in `server/app.py`
+    stay valid -- see the concatenate at the end of this function.
     """
     n = cfg.n_max
     R = cfg.retina_sectors

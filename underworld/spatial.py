@@ -71,7 +71,7 @@ def geometry(state: WorldState, nbr: jax.Array, cfg: Config):
     safe = jnp.clip(nbr, 0, cfg.n_max - 1)
     npos = state.pos[safe]                               # [n, M, 2]
     d = npos - state.pos[:, None, :]
-    half = cfg.world_size / 2.0
+    half = cfg.half_world
     d = (d + half) % cfg.world_size - half               # shortest torus vector
     dist = jnp.sqrt(jnp.sum(d * d, axis=2) + 1e-9)
     self_idx = jnp.arange(cfg.n_max)[:, None]
