@@ -120,15 +120,23 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     peer_scale = 1.0 if cfg.peer_channel_enabled else 0.0
     peer_val = closeness * (1.0 - jnp.abs(di - diet_j)) * peer_scale
 
-    prey_cols, pred_cols, peer_cols = [], [], []
-    for s in range(R):
-        m = sector == s
-        prey_cols.append(jnp.max(jnp.where(m, prey_val, 0.0), axis=1))
-        pred_cols.append(jnp.max(jnp.where(m, pred_val, 0.0), axis=1))
-        peer_cols.append(jnp.max(jnp.where(m, peer_val, 0.0), axis=1))
-    prey = jnp.stack(prey_cols, axis=1)                        # [n, R]
-    pred = jnp.stack(pred_cols, axis=1)                        # [n, R]
-    peer = jnp.stack(peer_cols, axis=1)                        # [n, R]
+    # Bin each candidate into its sector by a single scatter-max, rather than the
+    # old `for s in range(R)` loop that scanned the whole [n, M] candidate array
+    # R times per channel (3R passes). One `.at[rows, sector].max(val)` per
+    # channel does it in a single pass. `max` is order-independent, so this is
+    # bit-identical to the loop *and* introduces no scatter-add-style
+    # nondeterminism (unlike the per-cell energy scatters, a max scatter does not
+    # depend on reduction order). prey/pred/peer are all >= 0, so an empty sector
+    # keeps the zero-init, exactly as `jnp.max(where(m, val, 0.0))` gave 0 before.
+    # Measured 0.30ms -> 0.21ms on the sense component at n_max=16384.
+    rows = jnp.arange(n)[:, None]
+
+    def sector_max(val):
+        return jnp.zeros((n, R), val.dtype).at[rows, sector].max(val)  # [n, R]
+
+    prey = sector_max(prey_val)                                # [n, R]
+    pred = sector_max(pred_val)                                # [n, R]
+    peer = sector_max(peer_val)                                # [n, R]
 
     # --- field channels: sample a point ahead in each sector direction ---
     ang = state.heading[:, None] + (jnp.arange(R)[None, :] + 0.5) * width  # [n, R]

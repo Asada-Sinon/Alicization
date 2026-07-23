@@ -25,6 +25,7 @@
 | `docs/web_cleanup_audit.md` | **`web/` 前端清理审计（行为/视觉零变化）。** 无死代码；落地两类性能点（`render.js` 缓存 GL location + 采样器只绑一次、`main.js` 缓存每帧 DOM 元素）与两处过期注释（`--plant`、`C` 颜色块）。cross-file 契约全程未碰，`--contracts` 21 项全过，render 改动按 §10 截图验过 | 要动 `web/` 前端、或想知道哪些清理已做过时 |
 | `docs/water_system.md` | **水系统经济学审计——本轮调研的收敛点。** 用户"水消耗太快"假设的判决（成体不成立、幼体方向对但机制是"出生只给 21% 满箱"）；5 臂消融证明**水是那个总闸门**——调水经济第一次真的把捕食者赶离水（`carn_water_dist` 10.8→34.3）且大降渴死，但每个有效杠杆都让种群涨 27-72%、捕食者占比升到 33-41% | 讨论幼体渴死瓶颈、水参数、或"改一处能不能松动多条线"时 |
 | `docs/test_coverage_audit.md` | **测试覆盖审计 + 13 个新单元测试。** 补上六处沉默缺口：红皇后消融开关 no-op 等价性、有效射程=attack−escape 边界、捕食最近猎物+diet_delta 阈值、spatial 邻居索引溢出/死者沉默丢弃、生育 permutation-scatter 能量守恒、记忆分区边界。未发现被测代码 bug | 想加测试、动 `predation`/`reproduce`/`spatial`/消融开关、或问"这条不变量有没有守护"时 |
+| `docs/optimization_audit.md` | **JAX kernel 性能审计（行为不变）。** 画像：kernel 是**显存带宽受限**（~597 GB/s，59% 峰值）而非算力受限，`genome`[16384,1383]=90MiB 是搬运大头，热点是 `reproduce`（0.99ms）非 `brain.forward`。落地 1 项：`sensors.sense` 扇区聚合 Python 循环→单次 scatter-max（-30% 组件、逐位一致、scatter-max 幂等无新不确定性）。多数"缓存重复计算"候选查证为 XLA CSE 已免费处理，不改 | 想优化 kernel 性能、或问"某处重复计算要不要手动缓存"时 |
 | `docs/cleanup_audit.md` | **AI 冗余代码审计与清理（行为不变）。** 死代码核实（`prey_field` 确已删、无新未用 import）；`graze`/`eat_fruit` 食草锥度去重为 `_herbivory`；修三处过期注释（`memory.py` 那句 overclaim、`sensors.sense` 漏 mem/peer、`spatial` 半宽魔数）；`forage_pool` 更大去重让给性能审计未动。golden held + 全 pytest 过 | 想清理代码、或问"某段重复/死码为什么还在"时 |
 
 ## 硬约束（每次动手前确认）
