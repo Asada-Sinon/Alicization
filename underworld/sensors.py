@@ -143,6 +143,17 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     offset = jnp.stack([jnp.cos(ang), jnp.sin(ang)], axis=2) * cfg.food_sample_dist
     sample = jnp.mod(state.pos[:, None, :] + offset, cfg.world_size)       # [n, R, 2]
     cells = pos_to_cell(sample.reshape(-1, 2), cfg).reshape(n, R)
+
+    # Landscape of fear (docs/landscape_of_fear.md S3.2): the pred channel until
+    # now answered only "is a threat here right now"; folding the sampled fear
+    # trace in by max lets the same channel also answer "has a threat lately
+    # lurked that way", widening its time window without a new channel (so in_dim
+    # is untouched). `fear_rate > 0.0` is a compile-time branch: when off the
+    # fold is absent from the trace and `state.fear` is identically zero anyway,
+    # so this is a bit-exact no-op -- same convention as trample_impact.
+    if cfg.fear_rate > 0.0:
+        pred = jnp.maximum(pred, state.fear[cells] * cfg.fear_sense_scale)
+
     # Fruit rides the existing food channel weighted by what it is actually
     # worth to eat, rather than claiming a sixth retina channel. Both are food;
     # what an agent needs to see is edible energy ahead. Keeping them in one

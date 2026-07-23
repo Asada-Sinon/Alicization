@@ -532,6 +532,55 @@ class Config:
     #                                    OFF, same convention as
     #                                    `trample_impact`.
 
+    # --- landscape of fear (docs/landscape_of_fear.md S3.2, the #1-ranked path
+    # to push carnivores off the river). A [n_cells] `fear` field in WorldState
+    # takes a lagged, decaying imprint of where carnivores lurk; sensors.sense
+    # folds it into the existing `pred` retina channel via max, so prey can learn
+    # to skirt a predator's camping ground. A camped predator then carves a
+    # dead-zone prey avoid -> its ambush stops paying -> it must roam to eat.
+    # Zero in_dim/genome_size change (the fold reuses the pred channel), so an
+    # evolved population still loads. DEFAULT ON at the working point below,
+    # measured over 6 paired seeds (docs/landscape_of_fear.md "6.实测"): with the
+    # fear field on, carnivores ROAM instead of camping the river (carn_speed
+    # 1.5->2.4, up in 6/6 seeds, paired p=0.031) and their share drops modestly
+    # (carn_frac 12.1%->10.2%, down in 5/6) WITHOUT worsening the juvenile-thirst
+    # bottleneck (death_thirst_age rose, +4.9). The one thing it does NOT do is
+    # relocate predators far from water (carn_water_dist +1.4 only, noisy) -- true
+    # river-departure needs diel commuting, which this clockless world lacks.
+    # Turn OFF (the ablation control / pre-fear behaviour) with --set fear_rate=0:
+    # the deposit and the sensor fold are both compile-time branches on
+    # fear_rate>0, so at 0 the field stays identically zero and behaviour is
+    # bit-exact the pre-fear baseline.
+    fear_decay: float = 0.99      # per-step decay of the fear trace. Half-life
+    #                               ~69 steps, same timescale as trample_decay:
+    #                               it reflects *recent* predator presence, not a
+    #                               permanent territory map. A carnivore round of
+    #                               ambush-then-move leaves a fading mark, long
+    #                               enough for prey to react, short enough that a
+    #                               vacated spot reopens.
+    fear_rate: float = 0.05       # deposit per carnivore (diet>0.5) occupying a
+    #                               cell, per step, before decay. 0.05 (=5x the
+    #                               "start small" 0.01 probe) is the validated
+    #                               working point: strong enough that carn_speed
+    #                               moves in 6/6 seeds, gentle enough that thirst
+    #                               structure did not degrade. Set 0 for the
+    #                               ablation control. A single continuously-
+    #                               occupied cell asymptotes to fear_rate/(1-decay)
+    #                               = 0.05/0.01 = 5, clipped to the field cap 1.0,
+    #                               so an actively-camped cell saturates -- which is
+    #                               the point (a persistently-guarded spot reads as
+    #                               maximally dangerous).
+    fear_sense_scale: float = 3.0 # how strongly the sampled fear reads into the
+    #                               pred channel before the max-fold. At the 6-seed
+    #                               validated working point (3.0); 1.0 was too weak
+    #                               to clear seed noise (docs/landscape_of_fear.md
+    #                               6.实测: rate0.01/scale1.0 came back null). The
+    #                               risk to watch when raising it is the juvenile-
+    #                               thirst window (the river is both the highest-fear
+    #                               and the only-water place) -- death_thirst_frac/age,
+    #                               not just the spatial metrics; at 3.0 it held.
+    #                               Only read when fear_rate>0.
+
     # --- rng ---
     seed: int = 0
 

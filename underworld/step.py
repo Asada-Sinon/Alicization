@@ -107,9 +107,25 @@ def build_step(cfg: Config, terrain):
         effective_capacity = jnp.clip(
             terrain.capacity * (1.0 - trample * cfg.trample_impact), 0.0, None)
 
+        # 7a'. landscape of fear (docs/landscape_of_fear.md S3.2): imprint where
+        # carnivores stand onto a decaying [n_cells] field, exactly the trample
+        # idiom one line up but scattering carnivore presence rather than all
+        # feet. Read next step by sensors.sense, folded into the pred channel.
+        # `fear_rate > 0.0` is a compile-time branch (cfg is closed over, not
+        # traced), so when off the whole block is absent from the jit -- the
+        # field stays at its zero init and the sensor fold is a bit-exact no-op,
+        # same convention as trample_impact.
+        fear = state.fear
+        if cfg.fear_rate > 0.0:
+            carn_occ = jnp.zeros(cfg.n_cells).at[cell].add(
+                ((state.diet > 0.5) & state.alive).astype(jnp.float32))
+            fear = jnp.clip(state.fear * cfg.fear_decay + carn_occ * cfg.fear_rate,
+                            0.0, 1.0)
+
         # 7b. plants regrow; refresh the cached diet for the whole population
         state = state._replace(
             trample=trample,
+            fear=fear,
             plant=ecology.regrow(state.plant, effective_capacity, cfg.regrow_rate,
                                  cfg.regrow_baseline, cfg.plant_max),
             fruit=ecology.regrow(state.fruit, terrain.fruit_capacity,

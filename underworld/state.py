@@ -44,6 +44,16 @@ class WorldState(NamedTuple):
     #                                              per-*cell* field like plant/fruit,
     #                                              not per-agent, so reproduction.place()
     #                                              needs no change for it.
+    fear: jax.Array        # f32    [n_cells]    landscape of fear: a lagged, decaying
+    #                                              trace of where carnivores have lurked
+    #                                              (docs/landscape_of_fear.md S3.2). Same
+    #                                              per-cell shape and update idiom as
+    #                                              trample; folded into the pred retina
+    #                                              channel (sensors.sense) so prey can
+    #                                              learn to avoid a predator's camping
+    #                                              ground. Default off (fear_rate=0):
+    #                                              stays identically zero, so the fold is
+    #                                              a no-op -- same convention as trample.
 
 
 def diet_of(genome: jax.Array, cfg: Config) -> jax.Array:
@@ -178,6 +188,8 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         memory=jnp.zeros((n, cfg.memory_slots, 3)),
         # No one has walked anywhere yet.
         trample=jnp.zeros(cfg.n_cells),
+        # No predator has lurked anywhere yet.
+        fear=jnp.zeros(cfg.n_cells),
     )
 
 
