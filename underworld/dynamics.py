@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import WorldState, pos_to_cell
+from .state import WorldState, attack_range_of, escape_of, pos_to_cell
 
 
 def act(state: WorldState, outputs: jax.Array, terrain, cfg: Config):
@@ -151,7 +151,19 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
     d_i = state.diet[:, None]
     d_j = state.diet[safe]
     e_j = jnp.maximum(state.energy[safe], 0.0)
-    eligible = valid & (d_i - d_j > cfg.diet_delta) & (dist < cfg.attack_range) & (e_j > 0.0)
+
+    # Effective bite reach, the red-queen contest (docs/attack_range_redqueen.md):
+    # the attacker's own heritable reach, minus the *prey's* heritable evasion. Both
+    # flags are Python bools baked into the jit (Config is closed over, not traced),
+    # so an off arm compiles the constant/no-op branch away entirely -- the same
+    # convention as `peer_channel_enabled`, keeping every arm genome-compatible.
+    if cfg.attack_range_heritable:
+        reach = attack_range_of(state.genome, cfg)[:, None]        # [n, 1]
+    else:
+        reach = cfg.attack_range
+    if cfg.prey_escape_enabled:
+        reach = reach - escape_of(state.genome, cfg)[safe]         # [n, M]
+    eligible = valid & (d_i - d_j > cfg.diet_delta) & (dist < reach) & (e_j > 0.0)
 
     BIG = 1e9
     d_masked = jnp.where(eligible, dist, BIG)
@@ -186,7 +198,8 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
 
 def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
                climb: jax.Array, alive: jax.Array, cfg: Config,
-               size: jax.Array) -> jax.Array:
+               size: jax.Array, attack_range: jax.Array | None = None,
+               escape: jax.Array | None = None) -> jax.Array:
     """Charge the per-step energy cost of existing, moving, climbing, and (for
     carnivores) hunting. The diet-scaled term makes pure carnivory unsustainable
     when prey is scarce -- the feedback that keeps herbivores and carnivores
@@ -200,10 +213,25 @@ def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
     bound with no countervailing cost. Climb cost is left unscaled: it is not
     part of this design's claim and there is no measurement backing an exponent
     for it yet.
+
+    The red-queen taxes (`attack_range`/`escape`, docs/attack_range_redqueen.md)
+    ride the ENERGY ledger deliberately -- never `thirst`'s water ledger, which
+    would censor the trait through the juvenile-thirst bottleneck exactly as it
+    reversed the body-size gene (docs/trait_roadmap.md §5). Attack is charged only
+    above the 6.0 baseline and scaled by `diet` (so drifting herbivores pay ~0);
+    escape is scaled by `1-diet` (so drifting carnivores pay ~0). Both are optional
+    so the pre-gene call signature (and the metabolize unit test) still works; each
+    is gated by its ablation flag so a control arm's neutral-drift gene levies
+    nothing.
     """
     cost = (cfg.base_cost + cfg.move_cost * thrust + cfg.carn_cost * diet)
     cost = cost * (size ** 0.75) * alive
-    return energy - cost - cfg.climb_cost * climb
+    tax = jnp.zeros_like(cost)
+    if cfg.attack_range_heritable and attack_range is not None:
+        tax = tax + cfg.attack_cost * jnp.maximum(attack_range - cfg.attack_range, 0.0) * diet
+    if cfg.prey_escape_enabled and escape is not None:
+        tax = tax + cfg.escape_cost * escape * (1.0 - diet)
+    return energy - cost - cfg.climb_cost * climb - tax * alive
 
 
 def thirst(water: jax.Array, thrust: jax.Array, alive: jax.Array,

@@ -319,14 +319,21 @@ def check_config_invariants(r: Report) -> None:
              f"purpose, update this line and note that genome_size moved")
     r.expect(cfg.genome_size == cfg.brain_params + cfg.trait_dim,
              f"genome_size = {cfg.genome_size} = brain_params + trait_dim")
-    r.expect(cfg.size_index < cfg.genome_size,
+    r.expect(cfg.escape_index < cfg.genome_size,
              "trait gene indices are inside the genome",
-             f"size_index={cfg.size_index}, genome_size={cfg.genome_size}")
+             f"escape_index={cfg.escape_index}, genome_size={cfg.genome_size}")
 
     sense_cell = cfg.world_size / cfg.sense_grid
     r.expect(sense_cell >= cfg.vision_radius,
              f"sense cell ({sense_cell:.1f}) covers vision_radius ({cfg.vision_radius})",
              "agents outside the 3x3 block become invisible to vision and predation")
+    # The evolvable attack range obeys the same ceiling as vision: a bite beyond the
+    # sense cell reaches prey the neighbour table never gathered, so the extra reach
+    # would fail silently (docs/attack_range_redqueen.md). Guard the *max* the gene
+    # can express, not the neutral value.
+    r.expect(sense_cell >= cfg.attack_max,
+             f"sense cell ({sense_cell:.1f}) covers max attack_range ({cfg.attack_max})",
+             "evolved long-reach predators would bite prey outside the gathered 3x3 block")
     # Water is sampled at cell centres, so a river of width 2*half_width is only
     # guaranteed to land on a sample if a cell is no wider than that -- coarser
     # and a river can thread between centres, no cell reads as drinkable, and

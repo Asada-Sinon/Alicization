@@ -78,6 +78,32 @@ def size_of(genome: jax.Array, cfg: Config) -> jax.Array:
     return cfg.size_min + cfg.size_span * jax.nn.sigmoid(genome[:, cfg.size_index])
 
 
+def attack_range_of(genome: jax.Array, cfg: Config) -> jax.Array:
+    """Map the attack gene to [attack_min, attack_min+attack_span]; 6.0 at gene=0.
+
+    The predator's bite reach (docs/attack_range_redqueen.md). A gene of 0 sigmoids
+    to 0.5 -> `cfg.attack_range` (6.0), the old fixed constant, so a fresh population
+    starts at the previous behaviour. Read per-agent inside `dynamics.predation`
+    (attacker reach) and `dynamics.metabolize` (its energy tax); like `size_of` it is
+    recomputed from the genome rather than cached on `WorldState`.
+    """
+    return cfg.attack_min + cfg.attack_span * jax.nn.sigmoid(genome[:, cfg.attack_index])
+
+
+def escape_of(genome: jax.Array, cfg: Config) -> jax.Array:
+    """Map the escape gene to [0, escape_span/2]; 0 at gene=0.
+
+    The prey's evasion (docs/attack_range_redqueen.md), subtracted from an attacker's
+    reach to give the *effective* range against this prey. Neutral (gene 0) is exactly
+    0 -- a fresh population has no evasion, so any escape is evolved, not seeded. Uses
+    `sigmoid(gene) - 0.5` clipped at 0 (i.e. only the positive half of the logistic
+    counts), keeping the trait one-sided: a gene can only ever *buy* evasion, never a
+    negative one, and pays `escape_cost` in proportion to what it buys.
+    """
+    return cfg.escape_span * jnp.clip(jax.nn.sigmoid(genome[:, cfg.escape_index]) - 0.5,
+                                      0.0, None)
+
+
 def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
     k_pos, k_head, k_gen, k_hue, k_plant, k_carn, k_rej = jax.random.split(key, 7)
     n = cfg.n_max
