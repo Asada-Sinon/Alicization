@@ -296,6 +296,31 @@
       this.plantProg = program(gl, PLANT_VS, PLANT_FS);
       this.pointProg = program(gl, POINT_VS, POINT_FS);
 
+      // Attribute and uniform locations are fixed once a program is linked, so
+      // resolve them here instead of doing ~14 string lookups per frame in
+      // draw(). The two sampler uniforms never change unit either, so bind once.
+      this.plantLoc = {
+        a_pos: gl.getAttribLocation(this.plantProg, "a_pos"),
+        a_uv: gl.getAttribLocation(this.plantProg, "a_uv"),
+        u_plant: gl.getUniformLocation(this.plantProg, "u_plant"),
+        u_terrain: gl.getUniformLocation(this.plantProg, "u_terrain"),
+        u_texel: gl.getUniformLocation(this.plantProg, "u_texel"),
+        u_viewProj: gl.getUniformLocation(this.plantProg, "u_viewProj"),
+      };
+      this.pointLoc = {
+        a_pos: gl.getAttribLocation(this.pointProg, "a_pos"),
+        a_h: gl.getAttribLocation(this.pointProg, "a_h"),
+        a_diet: gl.getAttribLocation(this.pointProg, "a_diet"),
+        a_energy: gl.getAttribLocation(this.pointProg, "a_energy"),
+        u_viewProj: gl.getUniformLocation(this.pointProg, "u_viewProj"),
+        u_scale: gl.getUniformLocation(this.pointProg, "u_scale"),
+        u_hover: gl.getUniformLocation(this.pointProg, "u_hover"),
+        u_sizeRef: gl.getUniformLocation(this.pointProg, "u_sizeRef"),
+      };
+      gl.useProgram(this.plantProg);
+      gl.uniform1i(this.plantLoc.u_plant, 0);    // u_plant reads TEXTURE0
+      gl.uniform1i(this.plantLoc.u_terrain, 1);  // u_terrain reads TEXTURE1
+
       const mkTex = () => {
         const t = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, t);
@@ -577,21 +602,16 @@
         gl.LUMINANCE_ALPHA, gl.UNSIGNED_BYTE, this.foodBuf);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, this.terrainTex);
-      gl.uniform1i(gl.getUniformLocation(this.plantProg, "u_plant"), 0);
-      gl.uniform1i(gl.getUniformLocation(this.plantProg, "u_terrain"), 1);
-      gl.uniform1f(gl.getUniformLocation(this.plantProg, "u_texel"),
-        1.0 / this.terrainGrid);
-      gl.uniformMatrix4fv(gl.getUniformLocation(this.plantProg, "u_viewProj"),
-        false, this._viewProjM);
+      const pl = this.plantLoc;
+      gl.uniform1f(pl.u_texel, 1.0 / this.terrainGrid);
+      gl.uniformMatrix4fv(pl.u_viewProj, false, this._viewProjM);
       gl.activeTexture(gl.TEXTURE0);
 
       gl.bindBuffer(gl.ARRAY_BUFFER, this.terrainVBuf);
-      const aLoc = gl.getAttribLocation(this.plantProg, "a_pos");
-      const uvLoc = gl.getAttribLocation(this.plantProg, "a_uv");
-      gl.enableVertexAttribArray(aLoc);
-      gl.vertexAttribPointer(aLoc, 3, gl.FLOAT, false, 20, 0);
-      gl.enableVertexAttribArray(uvLoc);
-      gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 20, 12);
+      gl.enableVertexAttribArray(pl.a_pos);
+      gl.vertexAttribPointer(pl.a_pos, 3, gl.FLOAT, false, 20, 0);
+      gl.enableVertexAttribArray(pl.a_uv);
+      gl.vertexAttribPointer(pl.a_uv, 2, gl.FLOAT, false, 20, 12);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.terrainIBuf);
       gl.drawElements(gl.TRIANGLES, this.terrainIndexCount, this.terrainIndexType, 0);
 
@@ -609,30 +629,26 @@
         }
 
         gl.useProgram(this.pointProg);
+        const pt = this.pointLoc;
         gl.bindBuffer(gl.ARRAY_BUFFER, this.agentBuf);
         gl.bufferData(gl.ARRAY_BUFFER, agents, gl.DYNAMIC_DRAW);
-        const posLoc = gl.getAttribLocation(this.pointProg, "a_pos");
-        const dietLoc = gl.getAttribLocation(this.pointProg, "a_diet");
-        const enLoc = gl.getAttribLocation(this.pointProg, "a_energy");
-        gl.enableVertexAttribArray(posLoc);
-        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, stride, 0);
-        gl.enableVertexAttribArray(dietLoc);
-        gl.vertexAttribPointer(dietLoc, 1, gl.FLOAT, false, stride, 8);
-        gl.enableVertexAttribArray(enLoc);
-        gl.vertexAttribPointer(enLoc, 1, gl.FLOAT, false, stride, 12);
+        gl.enableVertexAttribArray(pt.a_pos);
+        gl.vertexAttribPointer(pt.a_pos, 2, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(pt.a_diet);
+        gl.vertexAttribPointer(pt.a_diet, 1, gl.FLOAT, false, stride, 8);
+        gl.enableVertexAttribArray(pt.a_energy);
+        gl.vertexAttribPointer(pt.a_energy, 1, gl.FLOAT, false, stride, 12);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this.agentHBuf);
         gl.bufferData(gl.ARRAY_BUFFER, this._hBuf.subarray(0, snap.n), gl.DYNAMIC_DRAW);
-        const hLoc = gl.getAttribLocation(this.pointProg, "a_h");
-        gl.enableVertexAttribArray(hLoc);
-        gl.vertexAttribPointer(hLoc, 1, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(pt.a_h);
+        gl.vertexAttribPointer(pt.a_h, 1, gl.FLOAT, false, 0, 0);
 
-        gl.uniformMatrix4fv(gl.getUniformLocation(this.pointProg, "u_viewProj"),
-          false, this._viewProjM);
-        gl.uniform1f(gl.getUniformLocation(this.pointProg, "u_hover"), this._agentHover);
-        gl.uniform1f(gl.getUniformLocation(this.pointProg, "u_sizeRef"), this._cam.dist);
+        gl.uniformMatrix4fv(pt.u_viewProj, false, this._viewProjM);
+        gl.uniform1f(pt.u_hover, this._agentHover);
+        gl.uniform1f(pt.u_sizeRef, this._cam.dist);
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
-        gl.uniform1f(gl.getUniformLocation(this.pointProg, "u_scale"), dpr);
+        gl.uniform1f(pt.u_scale, dpr);
         gl.drawArrays(gl.POINTS, 0, snap.n);
       }
     },

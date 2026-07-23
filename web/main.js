@@ -27,6 +27,16 @@
   const $ = (id) => document.getElementById(id);
   const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
 
+  // Elements the render loop touches every frame, resolved once so tick() and
+  // drawAllSparks() don't re-run getElementById ~22 times per frame. The DOM is
+  // static (reset never rebuilds it), so caching is safe.
+  const ui = {};
+  [
+    "sp_pop", "sp_carn", "sp_std", "sp_plant", "sp_vel", "sp_forest",
+    "sigilcap", "sv_pop", "sv_carn", "sv_std", "sv_plant", "sv_cv", "sv_hv",
+    "sv_forest", "elev", "diet", "energy", "water", "age", "winlen", "frame", "fps",
+  ].forEach((id) => (ui[id] = $(id)));
+
   Renderer.init(canvas);
 
   let latest = null;
@@ -266,24 +276,24 @@
   const pct = (x) => (x * 100).toFixed(0) + "%";
 
   function drawAllSparks() {
-    drawSparkline($("sp_pop"), [{ data: hist.pop, color: C.halo, fill: true }],
+    drawSparkline(ui.sp_pop, [{ data: hist.pop, color: C.halo, fill: true }],
       { fmt: (x) => x.toFixed(0) });
     // anchored at 0 (so the height still reads as a true proportion) but with a
     // free top -- on a fixed 0..1 axis a ~20% carnivore share flatlines against
     // the baseline and its oscillation, the interesting part, is invisible
-    drawSparkline($("sp_carn"), [{ data: hist.carn, color: C.carn, fill: true }],
+    drawSparkline(ui.sp_carn, [{ data: hist.carn, color: C.carn, fill: true }],
       { min: 0, fmt: pct });
-    drawSparkline($("sp_std"), [{ data: hist.std, color: C.halo, fill: true }],
+    drawSparkline(ui.sp_std, [{ data: hist.std, color: C.halo, fill: true }],
       { min: 0, fmt: (x) => x.toFixed(2) });
-    drawSparkline($("sp_plant"), [{ data: hist.plant, color: C.plant, fill: true }],
+    drawSparkline(ui.sp_plant, [{ data: hist.plant, color: C.plant, fill: true }],
       { fmt: (x) => x.toFixed(0) });
     // Both series are the same measure in the same units (world units/s), so
     // they legitimately share one axis -- this is not a dual-axis chart.
-    drawSparkline($("sp_vel"), [
+    drawSparkline(ui.sp_vel, [
       { data: hist.cv, color: C.carn },
       { data: hist.hv, color: C.herb },
     ], { min: 0, fmt: (x) => x.toFixed(1) });
-    drawSparkline($("sp_forest"), [{ data: hist.fst, color: C.plant, fill: true }],
+    drawSparkline(ui.sp_forest, [{ data: hist.fst, color: C.plant, fill: true }],
       { min: 0, max: 1, fmt: pct });
   }
 
@@ -463,28 +473,28 @@
       try { Renderer.draw(latest, STRIDE); } catch (e) { console.error(e); }
       positionRing();
       positionSigil();
-      $("sigilcap").textContent =
+      ui.sigilcap.textContent =
         `观 测 法 阵 · ${latest.world.toFixed(0)}²`;
-      $("sv_pop").textContent = latest.n.toLocaleString();
-      $("sv_carn").textContent = pct(latest.carnFrac);
-      $("sv_std").textContent = fmt(latest.dietStd, 2);
-      $("sv_plant").textContent = fmt(latest.plantTotal, 0);
-      $("sv_cv").textContent = fmt(latest.carnSpeed, 1);
-      $("sv_hv").textContent = fmt(latest.herbSpeed, 1);
-      $("sv_forest").textContent = pct(latest.forestFrac);
-      $("elev").textContent = fmt(latest.meanElev, 2);
-      $("diet").textContent = fmt(latest.meanDiet, 2);
-      $("energy").textContent = fmt(latest.meanEnergy, 2);
-      $("water").textContent = fmt(latest.meanWater, 2);
-      $("age").textContent = fmt(latest.meanAge, 0);
-      $("winlen").textContent = (hist.pop.length * speed).toLocaleString();
-      $("frame").textContent = latest.frame.toLocaleString();
+      ui.sv_pop.textContent = latest.n.toLocaleString();
+      ui.sv_carn.textContent = pct(latest.carnFrac);
+      ui.sv_std.textContent = fmt(latest.dietStd, 2);
+      ui.sv_plant.textContent = fmt(latest.plantTotal, 0);
+      ui.sv_cv.textContent = fmt(latest.carnSpeed, 1);
+      ui.sv_hv.textContent = fmt(latest.herbSpeed, 1);
+      ui.sv_forest.textContent = pct(latest.forestFrac);
+      ui.elev.textContent = fmt(latest.meanElev, 2);
+      ui.diet.textContent = fmt(latest.meanDiet, 2);
+      ui.energy.textContent = fmt(latest.meanEnergy, 2);
+      ui.water.textContent = fmt(latest.meanWater, 2);
+      ui.age.textContent = fmt(latest.meanAge, 0);
+      ui.winlen.textContent = (hist.pop.length * speed).toLocaleString();
+      ui.frame.textContent = latest.frame.toLocaleString();
       drawAllSparks();
     }
     frames++;
     const now = performance.now();
     if (now - lastFps > 500) {
-      $("fps").textContent = Math.round((frames * 1000) / (now - lastFps));
+      ui.fps.textContent = Math.round((frames * 1000) / (now - lastFps));
       frames = 0;
       lastFps = now;
     }
