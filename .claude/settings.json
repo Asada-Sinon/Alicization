@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,6 +10,17 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/require-preallocate.sh",
             "timeout": 10,
             "statusMessage": "checking XLA_PYTHON_CLIENT_PREALLOCATE"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/protect_paths.py",
+            "timeout": 10,
+            "statusMessage": "checking protected paths"
           }
         ]
       }
@@ -22,6 +34,42 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/contracts-after-edit.sh",
             "timeout": 30,
             "statusMessage": "checking cross-file contracts"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format_lint.py",
+            "timeout": 35,
+            "statusMessage": "checking file syntax"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/verify_stop.py",
+            "timeout": 310,
+            "statusMessage": "running .claude/verify.sh"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session_context.py",
+            "timeout": 20,
+            "statusMessage": "injecting persistent project state"
           }
         ]
       }
