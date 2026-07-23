@@ -32,7 +32,10 @@ input less.
 **Memory is not heritable.** Genes are the channel that crosses generations;
 memory is acquired within one lifetime and dies with its holder. A newborn gets
 empty slots and has to find water itself. An earlier version copied the parent's
-slots at birth -- Lamarckian, and measured to do nothing (see `reproduction.py`).
+slots at birth -- Lamarckian, and removed on that argument alone. The ablation
+that tested it was *underpowered* (n=6 paired, +0.020 mean inland_frac, p=0.175
+at 25% power), not a demonstrated null; equivalence bounds any effect below 0.05
+(TOST p=0.032). See `reproduction.py` and `docs/conventions.md` §4.
 Anything resembling a mother teaching a calf would have to be *learned*, by
 juveniles following adults and drinking for themselves, which the write path here
 already supports; it is not something to hand over at birth.
