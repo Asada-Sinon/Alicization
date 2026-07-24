@@ -202,6 +202,9 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
     last_meat = place(state.last_meat, zeros)
     last_damage = place(state.last_damage, zeros)
     last_drink = place(state.last_drink, zeros)
+    # Envenomation is not inherited -- a newborn starts clean, whatever debuff the
+    # slot's previous occupant carried (docs/trait_defense_landing.md §7).
+    venom = place(state.venom, zeros)
     hidden = place(state.hidden, jnp.zeros((cfg.n_max, cfg.hidden)))
     # Memory is NOT inherited -- newborns start with an empty map and have to
     # learn the world themselves. Genes are the heritable channel; memory is
@@ -219,6 +222,6 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
         alive=alive, energy=energy, water=water, genome=genome, pos=pos,
         heading=heading, hue=hue, age=age, vel=vel, generation=generation,
         last_food=last_food, last_meat=last_meat, last_damage=last_damage,
-        last_drink=last_drink, hidden=hidden, last_input=last_input,
+        last_drink=last_drink, venom=venom, hidden=hidden, last_input=last_input,
         last_output=last_output, memory=memory,
     )

@@ -73,7 +73,7 @@ def build_step(cfg: Config, terrain):
         # (second) predation pass sees it. None when day_length=0 -> bit-exact.
         light = (0.5 * (1.0 - jnp.cos(2.0 * jnp.pi * state.phase))
                  if cfg.day_length > 0 else None)
-        energy, meat_gain, damage, water, meat_water_gain, water_damage = \
+        energy, meat_gain, damage, water, meat_water_gain, water_damage, venom_deposit = \
             dynamics.predation(state, nbr2, dist2, valid2, cfg, light)
         # The red-queen taxes are levied on the ENERGY ledger in metabolize (never
         # thirst); read the two genes per-agent here, same cheap recompute as `size`.
@@ -83,15 +83,20 @@ def build_step(cfg: Config, terrain):
         # taxes; read per-agent here, the same cheap recompute as `size`.
         armor = armor_of(state.genome, cfg)
         spike = spike_of(state.genome, cfg)
+        # `state.venom` is this step's active envenomation (from last step's bites);
+        # metabolize charges its energy drain, act above already charged its slow.
         energy = dynamics.metabolize(
             energy, thrust, state.diet, climb, state.alive, cfg, size,
-            attack_range, escape, armor, spike)
+            attack_range, escape, armor, spike, state.venom)
         # Day-night heat (docs/day_night.md): midday raises evaporative water loss.
         # Reuses `light` computed above for the nocturnal predation boost (0 at
         # midnight, 1 at midday; None when day_length=0 -> thirst is bit-exact old).
         water = dynamics.thirst(water, thrust, state.alive, cfg, size, light)
+        # Decay the venom field and add this step's fresh deposits (from spiked prey
+        # that got bitten) -- the deposit-then-read-next-step idiom, like trample/fear.
+        venom = state.venom * cfg.venom_decay + venom_deposit
         state = state._replace(
-            energy=energy, water=water, age=state.age + state.alive,
+            energy=energy, water=water, age=state.age + state.alive, venom=venom,
             last_food=food_gain + fruit_gain, last_meat=meat_gain, last_damage=damage,
             last_drink=drink_gain + meat_water_gain + forage_water + fruit_water,
         )

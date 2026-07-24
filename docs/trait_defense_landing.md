@@ -178,3 +178,38 @@
   - **伪重复边界**：6 种子同一张地图；P1/P3 是基因层面性状均值、P2 是全局量，受伪重复影响小，但
     结论不外推到「河流一般」。分析脚本 `explorations/20260724-defence-evo-analysis/`（入库，可复算）。
 
+---
+
+## 7. 尖刺重设计：进攻/防御双用 + 持久中毒 debuff（2026-07-24）
+
+§6 判决 spike 未演化，根因是「反伤收益偏群体/亲缘级、个体级选择差太弱」。用户提出一个更有意思
+的重设计，把 spike 从「食草单向反伤」变成**进攻/防御双用**——**同一个 spike 基因，作用由你在一次
+捕食里是攻击方还是猎物决定**：
+
+- **食肉方＝进攻**：攻击者自己的尖刺**加大咬击伤害**（`dmg *= 1 + spike_offense_gain * atk_spike`），
+  正好**穿透已演化的 armor**。`[对应]` `dynamics.predation`。gene=0 → ×1，新生种群咬击与旧核一致
+  （中性起点保住，不像字面「只有尖刺能杀」会让 founder 食肉即灭绝——那个坑见下）。
+- **食草方＝防御**：被咬的猎物用尖刺**给攻击者下毒**——不是瞬时反伤，而是往攻击者的一个**会衰减的
+  `venom` 场**里沉积（`venom_deposit = prey_spike * spike_venom_gain`，命中才触发），之后几步在 `act`
+  里**减速**（`venom_slow`）、在 `metabolize` 里**耗能**（`venom_drain`）。**非致命**，这一口照样咬下。
+  `[对应]` 新增 `WorldState.venom:[n_max]`（per-agent，仿 fear/trample 的沉积-下步读取+衰减范式，
+  `reproduction.place` 让新生个体从 0 起）。
+
+**避开的坑（`[提案，非结论]` 里预判、实现时坐实）**：
+- **中性起点崩溃**：字面「只有尖刺才能杀」会让 spike=0 的新生食肉出生即饿死、founder 崩了测不到问题
+  （本项目反复踩的坑）。解法是把进攻做成**从旧 pred_rate 基线往上的乘子**（gene=0→×1），而非从 0 的
+  致死门。
+- **与 attack_range 分工**：attack_range=够不够得着（距离轴红皇后 vs escape），spike=够不够狠/穿甲
+  （伤害轴红皇后 vs armor）。互补不冲突。
+- **尖刺税改通用**：spike 现在双用，`metabolize` 的尖刺税从 `(1-diet)` 门控改为**两个食性都付**
+  （`spike_cost*spike`），各自在自己的角色里获益。
+
+**[本世界实测] 早期信号（落地即测，非最终判决）**：3 个种子 ×20000 步（venom 默认开）——
+食肉存活健康（`carn_frac` 0.12–0.17、min_pop 1080–1267，**无灭绝**，200 步 smoke 里 carn_frac
+−48.7% 是短程粒度噪声）；**`carn_spike` 抬到 0.14–0.21**（旧设计 2000 步仅 ~0.02，进攻侧选择明显
+在起作用）；但 **`herb_spike` 仍低（0.016–0.045）**，食草防御侧是否被盘活尚不明确，需 ON/OFF 消融
+判决（见 §8）。`mean_venom` 0.03–0.08 确认中毒机制在开火。
+
+**参数（初值，未探针标定）**：`spike_offense_gain=1.0`、`spike_venom_gain=2.0`、`venom_decay=0.9`、
+`venom_slow=0.6`、`venom_drain=0.15`。golden 因行为改变重 bless（carn_frac 等移动，预期内）。
+

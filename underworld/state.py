@@ -32,6 +32,15 @@ class WorldState(NamedTuple):
     last_meat: jax.Array   # f32    [n_max]      predation energy gained last step
     last_damage: jax.Array # f32    [n_max]      energy lost to predators last step
     last_drink: jax.Array  # f32    [n_max]      water gained last step (stream + meat)
+    venom: jax.Array       # f32    [n_max]      envenomation debuff: a carnivore that
+    #                                              bit a spiked prey carries this, decayed
+    #                                              each step (docs/trait_defense_landing.md
+    #                                              §7). Saps speed in `act` and energy in
+    #                                              `metabolize`. Per-*agent* (unlike per-cell
+    #                                              trample/fear), so reproduction.place() must
+    #                                              carry it -- newborns start at 0. Stays
+    #                                              identically 0 when spike_heritable=False,
+    #                                              so those folds are no-ops (like trample).
     hidden: jax.Array      # f32    [n_max, hidden]     recurrent brain state (memory)
     last_input: jax.Array  # f32    [n_max, in_dim]     last retina input (inspector)
     last_output: jax.Array # f32    [n_max, out_dim]    last brain output (inspector)
@@ -213,6 +222,8 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         alive=alive, pos=pos, heading=heading, vel=vel, energy=energy, water=water,
         age=age, genome=genome, hue=hue, diet=diet, generation=zeros,
         last_food=zeros, last_meat=zeros, last_damage=zeros, last_drink=zeros,
+        # No one has been envenomed yet.
+        venom=zeros,
         hidden=jnp.zeros((n, cfg.hidden)),
         last_input=jnp.zeros((n, cfg.in_dim)),
         last_output=jnp.zeros((n, cfg.out_dim)),

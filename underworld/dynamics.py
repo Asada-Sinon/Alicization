@@ -59,7 +59,11 @@ def act(state: WorldState, outputs: jax.Array, terrain, cfg: Config):
     slow = 1.0 - cfg.forest_slow * terrain.forest[cell] * (1.0 - path_relief)
 
     heading = jnp.mod(state.heading + turn * cfg.dt, 2.0 * jnp.pi)
-    speed = thrust * cfg.max_speed * slow
+    # Envenomation (docs/trait_defense_landing.md §7) saps speed: a carnivore that bit
+    # a spiked prey last step drags. `venom` is 0 for everyone when spike_heritable is
+    # off (or nobody has been bitten by a spiked prey), so this is a no-op there.
+    venom_slow = 1.0 - cfg.venom_slow * jnp.clip(state.venom, 0.0, 1.0)
+    speed = thrust * cfg.max_speed * slow * venom_slow
     vel = jnp.stack([jnp.cos(heading), jnp.sin(heading)], axis=1) * speed[:, None]
     vel = vel * state.alive[:, None]                    # the dead don't drift
     pos = jnp.mod(state.pos + vel * cfg.dt, cfg.world_size)
@@ -165,7 +169,8 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
     hydrates as well as feeds. Because a carnivore genuinely needs a weaker
     neighbour to eat, an all-carnivore population starves -- enforcing a
     herbivore-majority pyramid. Returns (energy, meat_gain, damage_taken, water,
-    water_gain, water_damage_taken).
+    water_gain, water_damage_taken, venom_deposit) -- the last is per-attacker
+    envenomation from spiked prey, added to the biter's `venom` field in step.py.
     """
     n = cfg.n_max
     safe = jnp.clip(nbr, 0, n - 1)
@@ -202,7 +207,14 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
     target = jnp.take_along_axis(nbr, best[:, None], axis=1)[:, 0]  # [n]
     target = jnp.where(has_target, target, n)                      # n = dump slot
 
-    dmg = jnp.where(has_target, cfg.pred_rate * state.diet, 0.0) * state.alive
+    base_dmg = jnp.where(has_target, cfg.pred_rate * state.diet, 0.0) * state.alive
+    # Carnivore OFFENSE (docs/trait_defense_landing.md §7): the attacker's own spikes
+    # add bite damage, which is what lets it punch through evolved prey armour. gene=0
+    # -> x1, so a fresh population bites exactly as the pre-spike kernel did.
+    if cfg.spike_heritable:
+        dmg = base_dmg * (1.0 + cfg.spike_offense_gain * spike_of(state.genome, cfg))
+    else:
+        dmg = base_dmg
     wanted = jnp.zeros(n + 1).at[target].add(dmg)                  # per-prey demand
     # Prey armour (docs/trait_defense_catalog.md) negates a fraction of each bite.
     # Scaling the per-prey *demand* -- not just the damage taken -- keeps predation
@@ -220,15 +232,16 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
     damage = removed[:n]                                           # [n]
     energy = state.energy - damage + meat_gain
 
-    # Prey spikes (docs/trait_defense_catalog.md) reflect energy back onto the biter
-    # in proportion to the damage its bite actually extracted. A pure sink on the
-    # attacker (not transferred to the prey), so it only ever reduces total energy --
-    # predation still creates none. Zero for non-attackers (dmg=0) and for the dump
-    # slot (spike 0), so no gating mask is needed.
+    # Herbivore DEFENSE (docs/trait_defense_landing.md §7): a bitten prey's spikes
+    # ENVENOM the attacker -- a debuff deposited on the biter that decays over the
+    # following steps (read by `act`/`metabolize`, decayed in `step.py`), NOT an
+    # instant energy reflect. Non-lethal here; its bite still lands. Zero for
+    # non-attackers (dmg=0) and the dump slot (spike 0), so no extra mask is needed.
     if cfg.spike_heritable:
-        spike = jnp.concatenate([spike_of(state.genome, cfg), jnp.zeros(1)])
-        bite_dealt = dmg * scale[target]                          # [n] energy extracted
-        energy = energy - cfg.spike_reflect * spike[target] * bite_dealt
+        prey_spike = jnp.concatenate([spike_of(state.genome, cfg), jnp.zeros(1)])
+        venom_deposit = jnp.where(dmg > 0.0, prey_spike[target] * cfg.spike_venom_gain, 0.0)
+    else:
+        venom_deposit = jnp.zeros(n)
 
     # Same bite events, but drawing against the prey's *water* pool instead.
     water_dmg = dmg * cfg.meat_water_frac
@@ -241,14 +254,14 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
     water_damage = water_removed[:n]
     water = state.water - water_damage + water_gain
 
-    return energy, meat_gain, damage, water, water_gain, water_damage
+    return energy, meat_gain, damage, water, water_gain, water_damage, venom_deposit
 
 
 def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
                climb: jax.Array, alive: jax.Array, cfg: Config,
                size: jax.Array, attack_range: jax.Array | None = None,
                escape: jax.Array | None = None, armor: jax.Array | None = None,
-               spike: jax.Array | None = None) -> jax.Array:
+               spike: jax.Array | None = None, venom: jax.Array | None = None) -> jax.Array:
     """Charge the per-step energy cost of existing, moving, climbing, and (for
     carnivores) hunting. The diet-scaled term makes pure carnivory unsustainable
     when prey is scarce -- the feedback that keeps herbivores and carnivores
@@ -286,9 +299,17 @@ def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
     # thirst (docs/trait_addition_feasibility.md §B.2).
     if cfg.armor_heritable and armor is not None:
         tax = tax + cfg.armor_cost * armor * (1.0 - diet)
+    # Spike tax is UNIVERSAL now (docs/trait_defense_landing.md §7): spikes are
+    # dual-use (carnivore offense / herbivore defense), so both lineages grow and pay
+    # for them -- no (1-diet) gate.
     if cfg.spike_heritable and spike is not None:
-        tax = tax + cfg.spike_cost * spike * (1.0 - diet)
-    return energy - cost - cfg.climb_cost * climb - tax * alive
+        tax = tax + cfg.spike_cost * spike
+    energy = energy - cost - cfg.climb_cost * climb - tax * alive
+    # Envenomation energy drain: the ongoing poison cost on a bitten carnivore. Zero
+    # when venom is 0 (spike off, or nobody envenomed), so a no-op there.
+    if venom is not None:
+        energy = energy - cfg.venom_drain * jnp.clip(venom, 0.0, 1.0) * alive
+    return energy
 
 
 def thirst(water: jax.Array, thrust: jax.Array, alive: jax.Array,

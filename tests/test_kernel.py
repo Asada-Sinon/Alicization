@@ -272,7 +272,7 @@ def test_predation_energy_not_created():
     table = spatial.build_table(state, cfg)
     nbr = spatial.gather_neighbors(state, table, cfg)
     _d, dist, valid = spatial.geometry(state, nbr, cfg)
-    _e, meat_gain, damage, _w, water_gain, water_damage = \
+    _e, meat_gain, damage, _w, water_gain, water_damage, _v = \
         dynamics.predation(state, nbr, dist, valid, cfg)
     assert float(jnp.sum(meat_gain)) <= float(jnp.sum(damage)) + 1e-3
     assert float(jnp.sum(water_gain)) <= float(jnp.sum(water_damage)) + 1e-3
@@ -503,12 +503,12 @@ def test_prey_escape_shrinks_effective_attack_reach():
 
     # No evasion -> the bite lands.
     st0 = state._replace(genome=state.genome.at[1, cfg.escape_index].set(0.0))
-    _, meat0, _, _, _, _ = dynamics.predation(st0, nbr, dist, valid, cfg)
+    _, meat0, _, _, _, _, _ = dynamics.predation(st0, nbr, dist, valid, cfg)
     assert float(meat0[0]) > 0.0
 
     # High evasion (escape ~5.9, effective reach ~0.1) -> the same bite misses.
     st1 = state._replace(genome=state.genome.at[1, cfg.escape_index].set(6.0))
-    _, meat1, _, _, _, _ = dynamics.predation(st1, nbr, dist, valid, cfg)
+    _, meat1, _, _, _, _, _ = dynamics.predation(st1, nbr, dist, valid, cfg)
     assert float(meat1[0]) == 0.0
 
 
@@ -530,11 +530,12 @@ def test_defence_genes_neutral_start_and_bounds():
 
 
 def test_defence_taxes_hit_energy_not_water():
-    """The armour/spike upkeep MUST ride the energy ledger, never thirst
-    (docs/trait_addition_feasibility.md §B.2): a water-ledger cost would recreate the
-    body-size gene's juvenile-thirst censoring. A high-armour and a high-spike
-    herbivore each lose extra *energy* in metabolize, scaled by (1-diet); neither
-    loses extra water in thirst (which takes neither argument)."""
+    """The armour/spike upkeep and the venom drain MUST ride the energy ledger, never
+    thirst (docs/trait_addition_feasibility.md §B.2): a water-ledger cost would recreate
+    the body-size gene's juvenile-thirst censoring. Armour is (1-diet)-gated (only the
+    hunted pay); the spike tax is UNIVERSAL (both lineages grow spikes, offensive for
+    carnivores / defensive for herbivores -- docs/trait_defense_landing.md §7); none of
+    the three touch water in thirst (which takes none of them)."""
     cfg = tiny_cfg()
     alive = jnp.array([True, True])
     thrust = jnp.array([0.5, 0.5])
@@ -553,21 +554,31 @@ def test_defence_taxes_hit_energy_not_water():
                                         base, z, z, z)[0])
     assert e_noarm - e_arm == pytest.approx(cfg.armor_cost * 0.4, rel=1e-4)
 
-    # Spike tax = spike_cost * spike * (1-diet).
+    # Spike tax = spike_cost * spike (universal -- same for a herbivore here).
     spk = jnp.array([0.4, 0.4])
     e_spk = float(dynamics.metabolize(e0, thrust, diet_h, climb, alive, cfg, size,
                                       base, z, z, spk)[0])
     assert e_noarm - e_spk == pytest.approx(cfg.spike_cost * 0.4, rel=1e-4)
 
-    # A carnivore (diet 1) pays ~0 for either -- the (1-diet) gate.
+    # A carnivore (diet 1) pays ~0 for ARMOUR (still (1-diet)-gated), but DOES pay the
+    # UNIVERSAL spike tax for its offensive spikes.
     diet_c = jnp.array([1.0, 1.0])
     e_carn_arm = float(dynamics.metabolize(e0, thrust, diet_c, climb, alive, cfg, size,
-                                           base, z, arm, spk)[0])
+                                           base, z, arm, z)[0])
     e_carn_none = float(dynamics.metabolize(e0, thrust, diet_c, climb, alive, cfg, size,
                                             base, z, z, z)[0])
-    assert e_carn_none - e_carn_arm == pytest.approx(0.0, abs=1e-6)
+    assert e_carn_none - e_carn_arm == pytest.approx(0.0, abs=1e-6)   # no armour tax
+    e_carn_spk = float(dynamics.metabolize(e0, thrust, diet_c, climb, alive, cfg, size,
+                                           base, z, z, spk)[0])
+    assert e_carn_none - e_carn_spk == pytest.approx(cfg.spike_cost * 0.4, rel=1e-4)
 
-    # Thirst is untouched by either defence gene -- it takes neither argument.
+    # Venom drain also rides the energy ledger, scaled by clip(venom, 0, 1).
+    ven = jnp.array([1.0, 1.0])
+    e_ven = float(dynamics.metabolize(e0, thrust, diet_h, climb, alive, cfg, size,
+                                      base, z, z, z, ven)[0])
+    assert e_noarm - e_ven == pytest.approx(cfg.venom_drain * 1.0, rel=1e-4)
+
+    # Thirst is untouched by any defence gene or venom -- it takes none of them.
     w = dynamics.thirst(jnp.array([10.0, 10.0]), thrust, alive, cfg, size)
     assert float(w[0]) == pytest.approx(
         10.0 - (cfg.base_water_cost + cfg.move_water_cost * 0.5) * (1.0 ** 0.75),
@@ -575,9 +586,10 @@ def test_defence_taxes_hit_energy_not_water():
 
 
 def test_armor_reduces_bite_and_spike_hurts_attacker():
-    """Armour cuts the energy a prey loses to a bite; spikes reflect energy back onto
-    the biter -- both relative to the same undefended baseline, and predation must
-    still never create energy (docs/trait_defense_catalog.md)."""
+    """Armour cuts the energy a prey loses to a bite; a carnivore's own spikes make its
+    bite hit HARDER (offense); a prey's spikes ENVENOM the attacker (a deposit onto the
+    biter, not an instant reflect) -- all relative to the same undefended baseline, and
+    predation must still never create energy (docs/trait_defense_landing.md §7)."""
     cfg = tiny_cfg(n_max=2, n_init=2)
     terrain = terrain_mod.build(cfg)
     state = init_state(cfg, jax.random.PRNGKey(0), terrain)
@@ -596,26 +608,52 @@ def test_armor_reduces_bite_and_spike_hurts_attacker():
     dist = jnp.array([[3.0], [3.0]])
     valid = jnp.array([[True], [True]])
 
-    # Baseline: no defence.
-    g0 = state.genome.at[1, cfg.armor_index].set(0.0).at[1, cfg.spike_index].set(0.0)
-    e0, meat0, dmg0, _, _, _ = dynamics.predation(state._replace(genome=g0),
-                                                  nbr, dist, valid, cfg)
+    # Baseline: no defence, and the attacker carnivore has no offensive spike.
+    g0 = state.genome.at[:, cfg.spike_index].set(0.0).at[1, cfg.armor_index].set(0.0)
+    e0, meat0, dmg0, _, _, _, ven0 = dynamics.predation(state._replace(genome=g0),
+                                                        nbr, dist, valid, cfg)
     assert float(dmg0[1]) > 0.0                          # the prey took a bite
     assert float(jnp.sum(meat0)) <= float(jnp.sum(dmg0)) + 1e-4  # no energy created
+    assert float(ven0[0]) == 0.0                         # no spikes -> no venom
 
     # Armour: the prey loses strictly less energy to the same bite.
-    g_arm = state.genome.at[1, cfg.armor_index].set(6.0)   # armor ~0.5
-    _, _, dmg_arm, _, _, _ = dynamics.predation(state._replace(genome=g_arm),
-                                                nbr, dist, valid, cfg)
+    g_arm = g0.at[1, cfg.armor_index].set(6.0)             # armor ~0.5
+    _, _, dmg_arm, _, _, _, _ = dynamics.predation(state._replace(genome=g_arm),
+                                                   nbr, dist, valid, cfg)
     assert float(dmg_arm[1]) < float(dmg0[1])
 
-    # Spike: the attacker (agent 0) ends with strictly less energy than undefended.
-    g_spk = state.genome.at[1, cfg.spike_index].set(6.0)   # spike ~0.5
-    e_spk, meat_spk, dmg_spk, _, _, _ = dynamics.predation(state._replace(genome=g_spk),
-                                                           nbr, dist, valid, cfg)
-    assert float(e_spk[0]) < float(e0[0])
-    # Still no free energy for the attacker.
-    assert float(jnp.sum(meat_spk)) <= float(jnp.sum(dmg_spk)) + 1e-4
+    # Carnivore OFFENSE: the attacker's (agent 0) own spikes make its bite hit harder.
+    g_off = g0.at[0, cfg.spike_index].set(6.0)             # attacker spike ~0.5
+    _, _, dmg_off, _, _, _, _ = dynamics.predation(state._replace(genome=g_off),
+                                                   nbr, dist, valid, cfg)
+    assert float(dmg_off[1]) > float(dmg0[1])             # spiked carnivore bites harder
+
+    # Herbivore DEFENSE: a spiked prey (agent 1) envenoms its attacker (venom_deposit,
+    # the 7th return) -- non-lethal, the bite still lands, and no energy is created.
+    g_def = g0.at[1, cfg.spike_index].set(6.0)             # prey spike ~0.5
+    e_d, meat_d, dmg_d, _, _, _, ven_d = dynamics.predation(state._replace(genome=g_def),
+                                                            nbr, dist, valid, cfg)
+    assert float(ven_d[0]) > 0.0                          # attacker gets envenomed
+    assert float(jnp.sum(meat_d)) <= float(jnp.sum(dmg_d)) + 1e-4
+
+
+def test_venom_slows_movement():
+    """An envenomed agent (venom>0) moves slower than an identical un-envenomed one
+    under the same thrust -- the herbivore->carnivore retaliation debuff acting in
+    `act` (docs/trait_defense_landing.md §7)."""
+    cfg = tiny_cfg(n_max=2, n_init=2)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+    # Same cell (so identical forest slow) and heading; the only difference is venom.
+    state = state._replace(
+        pos=jnp.zeros((2, 2)), heading=jnp.zeros(2), alive=jnp.array([True, True]),
+        venom=jnp.array([0.0, 1.0]))
+    outputs = jnp.zeros((2, cfg.out_dim)).at[:, 1].set(1.0)   # full forward thrust
+    moved, _thrust, _climb = dynamics.act(state, outputs, terrain, cfg)
+    v_clean = float(jnp.linalg.norm(moved.vel[0]))
+    v_venom = float(jnp.linalg.norm(moved.vel[1]))
+    assert v_venom < v_clean
+    assert v_venom == pytest.approx(v_clean * (1.0 - cfg.venom_slow), rel=1e-3)
 
 
 def test_defence_genes_recombine_unlike_size():
@@ -1321,11 +1359,11 @@ def test_prey_escape_effective_reach_is_attack_minus_escape():
     st_in, nbr, _d, valid = _two_agent_predation_state(
         cfg, dist=effective - 0.15, prey_escape_gene=1.0)
     d_in = jnp.array([[effective - 0.15], [effective - 0.15]])
-    _, meat_in, _, _, _, _ = dynamics.predation(st_in, nbr, d_in, valid, cfg)
+    _, meat_in, _, _, _, _, _ = dynamics.predation(st_in, nbr, d_in, valid, cfg)
     assert float(meat_in[0]) > 0.0, "bite just inside the effective reach must land"
 
     d_out = jnp.array([[effective + 0.15], [effective + 0.15]])
-    _, meat_out, _, _, _, _ = dynamics.predation(st_in, nbr, d_out, valid, cfg)
+    _, meat_out, _, _, _, _, _ = dynamics.predation(st_in, nbr, d_out, valid, cfg)
     assert float(meat_out[0]) == 0.0, "bite just outside the effective reach must miss"
 
 
@@ -1350,7 +1388,7 @@ def test_predation_hits_nearest_eligible_prey_only():
     dist = jnp.array([[3.0, 5.0], [3.0, 3.0], [5.0, 5.0]])
     valid = jnp.array([[True, True], [True, False], [True, False]])
 
-    _e, meat, damage, _w, _wg, _wd = dynamics.predation(state, nbr, dist, valid, cfg)
+    _e, meat, damage, _w, _wg, _wd, _v = dynamics.predation(state, nbr, dist, valid, cfg)
     assert float(damage[1]) > 0.0, "the nearer prey must be bitten"
     assert float(damage[2]) == 0.0, "the farther prey must be untouched (only nearest)"
     assert float(meat[0]) > 0.0
@@ -1373,7 +1411,7 @@ def test_predation_respects_diet_delta_threshold():
     nbr = jnp.array([[1], [0]])
     dist = jnp.array([[3.0], [3.0]])
     valid = jnp.array([[True], [True]])
-    _e, meat, damage, _w, _wg, _wd = dynamics.predation(state, nbr, dist, valid, cfg)
+    _e, meat, damage, _w, _wg, _wd, _v = dynamics.predation(state, nbr, dist, valid, cfg)
     assert float(damage[1]) == 0.0, "sub-threshold diet gap must not be edible"
     assert float(meat[0]) == 0.0
 

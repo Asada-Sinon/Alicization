@@ -174,15 +174,31 @@ class Config:
     #                                  levies no tax; the gene still exists, drifts and
     #                                  is reported -- the clean control arm, genome-
     #                                  compatible with the True arm.
-    spike_span: float = 1.0          # spike_of maps the gene to [0, 0.5]: energy
-    #                                  reflected onto the attacker per unit of damage its
-    #                                  bite deals. 0 at gene=0.
-    spike_reflect: float = 1.0       # multiplier on (bite_damage * spike) reflected back
-    #                                  onto the biter. A pure energy sink on the attacker,
-    #                                  never transferred to the prey.
-    spike_cost: float = 0.012        # energy/step per unit spike, scaled by (1-diet).
+    # spike is DUAL-USE (docs/trait_defense_landing.md §7, redesign after the first
+    # evolution run showed the old reflect-only spike was too kin-level to evolve):
+    # the SAME gene is an OFFENSIVE weapon for a carnivore (extra bite damage, which
+    # punches through evolved prey armour) and a DEFENSIVE retaliation for a herbivore
+    # (a bitten prey ENVENOMS its attacker -- a decaying slow + energy drain over the
+    # following steps, non-lethal). Which role applies is set by whether you are the
+    # attacker or the prey in a bite, not by a diet branch. gene=0 -> no offense bonus
+    # and no venom, so a fresh population reproduces the old predation exactly.
+    spike_span: float = 1.0          # spike_of maps the gene to [0, 0.5]. 0 at gene=0.
+    spike_offense_gain: float = 1.0  # attacker bite damage *= (1 + spike_offense_gain *
+    #                                  attacker_spike). spike=0 -> x1 (neutral start).
+    spike_venom_gain: float = 2.0    # venom deposited on the attacker when a bite lands
+    #                                  = prey_spike * spike_venom_gain (prey_spike in
+    #                                  [0,0.5], so up to ~1.0 per hit, accumulating).
+    spike_cost: float = 0.012        # energy/step per unit spike -- UNIVERSAL now (not
+    #                                  (1-diet)-gated): both lineages grow & pay for
+    #                                  spikes, each benefiting in its own role.
     spike_mutation_sigma: float = 0.02
-    spike_heritable: bool = True     # False: spikes have no effect and no tax (control).
+    spike_heritable: bool = True     # False: spikes have no offense, deposit no venom,
+    #                                  and levy no tax -- the clean control arm.
+    # Venom debuff field (per-agent, decays like fear/trample): a carnivore that bit a
+    # spiked prey carries `venom` that saps its speed and energy for a few steps.
+    venom_decay: float = 0.9         # per-step multiplicative decay (~7-step half-life).
+    venom_slow: float = 0.6          # fraction of speed removed at venom>=1 (clipped).
+    venom_drain: float = 0.15        # energy/step drained at venom>=1 (clipped).
 
     # --- terrain: one elevation field drives mountains, rivers and forest ---
     # h(x,y) = H_local(x) * exp(-d_ridge^2 / 2*sigma^2)          <- the range

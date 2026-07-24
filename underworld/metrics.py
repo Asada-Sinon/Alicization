@@ -97,8 +97,10 @@ class Metrics(NamedTuple):
     carn_armor: jax.Array       # carnivore-lineage mean: diet-gate control, expect ~0
     mean_spike: jax.Array
     spike_std: jax.Array
-    herb_spike: jax.Array       # herbivore-lineage mean: the real retaliation
-    carn_spike: jax.Array       # diet-gate control, expect ~0
+    herb_spike: jax.Array       # herbivore-lineage mean (defensive envenomation)
+    carn_spike: jax.Array       # carnivore-lineage mean (offensive bite bonus)
+    mean_venom: jax.Array       # mean active envenomation debuff over the living --
+    #                             shows the herbivore->carnivore retaliation firing
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -219,4 +221,5 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         spike_std=jnp.sqrt(spike_var),
         herb_spike=herb_spike,
         carn_spike=carn_spike,
+        mean_venom=jnp.sum(state.venom * alive) / denom,
     )
