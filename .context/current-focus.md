@@ -2,39 +2,30 @@
 
 只写此刻在做的那一件事。方向变了就整个重写，不要往下堆。超过一屏说明该拆了。
 
-## 当前目标
+## 当前目标（2026-07-25 夜，自主授权收尾）
 
-**昼夜系统整条线已落地并收口（2026-07-24，见 `docs/day_night.md`、`HANDOFF.md`）。
-本轮结束，下一个方向待用户定盘——不要自己挑一个开跑。**
+用户睡前自主授权的整批工作已基本完成并推送。收尾中：等 `20260725-carrion` 6 种子重跑
+（第一次因 GPU 超订 OOM，改 2 波×6 重跑），填 `multispecies_feasibility.md` §7 结果，做最后
+一次状态提交，然后本轮结束。
 
-昼夜落地的净结果：
-- `pred_nocturnal`（夜间捕食者射程↑）**已默认开启**（`day_length=400`+`pred_night_amp=1.0`）：
-  捕食风险昼夜错峰（hunt_success 夜−昼 +0.245，6/6）、渴死 −13pp、代价 carn_frac +3.3pp。
-- **"捕食者搬离河岸"结构不可达**（水太硬），Phase 2（加大脑演化空间通勤）证伪。恐惧场那条
-  "缺昼夜通勤"的悬案就此收口。
+## 本轮已完成（全部已 push 到 main）
 
-## 为什么现在停
+- **防御性状**：armor 演化验证 ✅（6 种子 p=0.031）、尖刺重设计（进攻侧盘活/防御侧未活）、
+  可视化 wire v8/v9（厚皮/尖刺/中毒染绿 + inspector）。
+- **食草过多判决**：四条降密度杠杆全部失败（`herbivore_overpopulation.md §6`），根因水限+尺度
+  不变，诚实建议承认刻意压缩、不改默认。
+- **两个默认关新机制**：L6 密度制约繁殖（`bd8107f`）、腐食通路 carrion/scavenge（`37dda74`）。
+- **三份调研报告** + MEMORY 教训（跑实验前先提交）。
 
-- 昼夜是恐惧场那条线明确点名的下一步，已做完；两条用户要的（落地 pred_nocturnal + 演化通勤）
-  都有了判决（一个默认开、一个证伪）。
-- 下一个方向会动世界行为或 golden 带，且基线已迁移（昼夜默认开、carn_frac +3.3pp），
-  应由用户定盘。
+## PENDING（下个 session 第一件事）
 
-## 候选方向（供用户选，均未被确认）
+1. **看 `20260725-carrion` 6 种子结果**：carn_frac ON>OFF？min 抬高（抗灭绝）？渴死不恶化？
+   → 填 `multispecies_feasibility.md` §7、判正/负、决定是否默认开或加 scavenge trait。
+2. 用户 #4（多性状）、#5（种间合作脚手架=共享报警场）**尚未动手**——研究已在
+   `multispecies_ecology.md §5`/`multispecies_feasibility.md §5`，是下一批实现候选。
 
-1. **密度 D（压 carn_frac 修比例）** —— `scale_and_density.md` §5.3。注意 `pred_nocturnal` 刚把
-   carn_frac 抬了 +3.3pp，基线变了、这条更相关也更难。走 `carnivore_riparian.md` 的
-   `carn_cost`/能量转换路线。
-2. **其它** —— 见 `docs/TODO.md` 队列的"未做"与"零散"。
+## 纪律
 
-## 完成判据（本轮）
-
-- 昼夜所有结论落 `docs/day_night.md`、`HANDOFF.md`/`docs/TODO.md`/本文件同步、全部 push。✅
-- 用户给出下一个方向后，本文件整个重写为那件事。
-
-## 不做什么
-
-- **不要自己挑一个方向就开跑。**
-- **不要再加码 Phase 2（演化空间通勤）**——2 尺度 2 脑 2 种子已证伪，根因是静态地形缺动态选择压，
-  不是脑不够大。除非先引入动态环境（超出昼夜范围的大工程）。
-- **对照昼夜前基线一律 `--set day_length=0`**（编译期分支、逐位复现），别拿旧分支数字直接比。
+- 并行跑实验**最多 6 个并发**（12 个会 GPU OOM）。
+- ecology 改动 6 种子、默认关新机制保 golden bit-exact、跑实验前先提交。
+- push 用 `GIT_SSH_COMMAND="ssh -o BatchMode=yes" git push`（ssh-agent 死了）。
