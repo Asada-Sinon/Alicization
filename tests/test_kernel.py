@@ -288,6 +288,35 @@ def test_alive_energy_consistency():
     assert bool(jnp.all(state.energy[dead] <= cfg.repro_threshold))
 
 
+def test_scavenge_feeds_carnivores_not_herbivores():
+    """dynamics.scavenge: a carnivore standing on carrion gains energy from it; a
+    herbivore on the same carrion gains ~0 (diet-gated). Carrion is consumed.
+    (docs/multispecies_feasibility.md §4)"""
+    from underworld.state import diet_of, pos_to_cell
+    cfg = tiny_cfg(n_max=2, n_init=2)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+    genome = state.genome.at[0, cfg.diet_index].set(6.0).at[1, cfg.diet_index].set(-6.0)
+    pos = jnp.zeros((2, 2))                                   # both on the same cell
+    carrion = jnp.zeros(cfg.n_cells).at[pos_to_cell(pos, cfg)[0]].set(5.0)
+    state = state._replace(genome=genome, diet=diet_of(genome, cfg), pos=pos,
+                           alive=jnp.array([True, True]), energy=jnp.array([10.0, 10.0]),
+                           carrion=carrion)
+    energy, carr, gain, _w = dynamics.scavenge(state, cfg)
+    assert float(gain[0]) > 0.0                              # carnivore scavenges
+    assert float(gain[0]) > float(gain[1]) * 5.0             # far more than the herbivore
+    assert float(energy[0]) > 10.0                           # carnivore gained energy
+    assert float(jnp.sum(carr)) < 5.0                        # carrion was consumed
+
+
+def test_carrion_off_by_default_stays_zero():
+    """With carrion_enabled False (default) no corpse is deposited and nothing scavenges,
+    so the field stays identically 0 -- the world is bit-exact the pre-carrion kernel."""
+    cfg = tiny_cfg()
+    state, _ms = run(cfg, 50)
+    assert float(jnp.sum(state.carrion)) == 0.0, "carrion must stay 0 when disabled"
+
+
 def test_density_dependent_reproduction_suppresses_crowded_births():
     """With density_repro_penalty>0 a crowded cell raises the energy bar to breed, so
     the same breeders produce fewer offspring than with the penalty off

@@ -51,11 +51,20 @@ def build_step(cfg: Config, terrain):
         energy, plant, food_gain, forage_water = dynamics.graze(state, cfg)
         state = state._replace(energy=energy, plant=plant)
         energy, fruit, fruit_gain, fruit_water = dynamics.eat_fruit(state, cfg)
+        state = state._replace(energy=energy, fruit=fruit)
+        # Scavenging: carnivores eat carrion at their cell (docs/multispecies_feasibility.md
+        # §4). Default off (carrion_enabled=False) -> this whole branch compiles away and
+        # the world is bit-exact the pre-carrion kernel.
+        scav_water = jnp.zeros_like(state.water)
+        if cfg.carrion_enabled:
+            energy, carrion, _scav_gain, scav_water = dynamics.scavenge(state, cfg)
+            state = state._replace(energy=energy, carrion=carrion)
         water, drink_gain = dynamics.drink(state, terrain, cfg, size)
         # Forage water lands inside the same cap as drinking, so eating can
         # top a tank up but never overfill one past what a river would.
-        water = jnp.minimum(water + forage_water + fruit_water, cfg.water_max * size)
-        state = state._replace(energy=energy, water=water, fruit=fruit)
+        water = jnp.minimum(water + forage_water + fruit_water + scav_water,
+                            cfg.water_max * size)
+        state = state._replace(water=water)
 
         # 4b. remember where that came from. Writes are triggered by the eating
         # itself, not by a brain decision -- the agent does not choose to
@@ -98,11 +107,21 @@ def build_step(cfg: Config, terrain):
         state = state._replace(
             energy=energy, water=water, age=state.age + state.alive, venom=venom,
             last_food=food_gain + fruit_gain, last_meat=meat_gain, last_damage=damage,
-            last_drink=drink_gain + meat_water_gain + forage_water + fruit_water,
+            last_drink=drink_gain + meat_water_gain + forage_water + fruit_water + scav_water,
         )
 
         # 5. death -> 6. birth
+        alive_before = state.alive
         state, deaths = reproduction.cull(state, water_damage, cfg)
+        # Carrion: a newly-dead agent leaves a corpse (scaled by body size) in its cell
+        # that rots over time; carnivores scavenge it next step (docs/multispecies_
+        # feasibility.md §4). Deposit-then-read-next-step + decay, like fear/trample.
+        # Default off (carrion_enabled=False) -> carrion stays identically 0.
+        if cfg.carrion_enabled:
+            newly_dead = (alive_before & (~state.alive)).astype(jnp.float32)
+            deposit = jnp.zeros(cfg.n_cells).at[pos_to_cell(state.pos, cfg)].add(
+                cfg.carrion_per_death * size * newly_dead)
+            state = state._replace(carrion=state.carrion * cfg.carrion_decay + deposit)
         # Local crowd (agents per plant cell) for density-dependent reproduction
         # (docs/herbivore_overpopulation.md L6). Post-cull, pre-birth: parents' own
         # crowd throttles their breeding. Cheap scatter-count, no new state field.

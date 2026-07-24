@@ -138,6 +138,26 @@ def eat_fruit(state: WorldState, cfg: Config):
     return energy, fruit, gain, taken * cfg.forage_water_frac
 
 
+def scavenge(state: WorldState, cfg: Config):
+    """Carnivores eat carrion at their cell -- a second meat source besides live prey
+    (docs/multispecies_feasibility.md §4). Structurally identical to `graze`: a per-cell
+    demand pool, fair share of what the cell holds -- but the skill scales with `diet`
+    (only meat-eaters scavenge; herbivores draw ~0) and it drains the `carrion` field
+    instead of the plant field. A corpse hydrates like a kill (`meat_water_frac`).
+    Only called when `carrion_enabled`. Returns (energy, carrion, scav_gain, water_gain).
+    """
+    cell = pos_to_cell(state.pos, cfg)
+    demand = cfg.carrion_eat_rate * state.diet * state.alive          # carnivores scavenge
+    demand_per_cell = jnp.zeros(cfg.n_cells).at[cell].add(demand)
+    removed_per_cell = jnp.minimum(demand_per_cell, state.carrion)
+    frac = jnp.where(demand_per_cell > 0, removed_per_cell / demand_per_cell, 0.0)
+    taken = demand * frac[cell]
+    gain = taken * cfg.carrion_energy
+    energy = state.energy + gain
+    carrion = state.carrion - removed_per_cell
+    return energy, carrion, gain, gain * cfg.meat_water_frac
+
+
 def drink(state: WorldState, terrain, cfg: Config, size: jax.Array):
     """Hydration: standing in a river or at the sea refills water, uncapped by any
     shared demand pool (flowing water isn't meaningfully depleted at this scale,

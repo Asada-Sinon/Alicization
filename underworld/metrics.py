@@ -101,6 +101,8 @@ class Metrics(NamedTuple):
     carn_spike: jax.Array       # carnivore-lineage mean (offensive bite bonus)
     mean_venom: jax.Array       # mean active envenomation debuff over the living --
     #                             shows the herbivore->carnivore retaliation firing
+    carrion_total: jax.Array    # standing corpse mass (docs/multispecies_feasibility.md
+    #                             §4); 0 when carrion_enabled is off
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -222,4 +224,5 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         herb_spike=herb_spike,
         carn_spike=carn_spike,
         mean_venom=jnp.sum(state.venom * alive) / denom,
+        carrion_total=jnp.sum(state.carrion),
     )

@@ -506,6 +506,25 @@ class Config:
     #                                   product; with forest**2 on top this lands
     #                                   fruit on a small percentage of the map
 
+    # --- carrion: a scavenging trophic pathway (docs/multispecies_feasibility.md §4).
+    # A per-cell field (like plant/fruit/fear/trample) that receives a deposit when an
+    # agent dies and rots away over time; carnivores can eat it as a second meat source
+    # besides live prey. Default OFF (carrion_enabled=False) -> nothing is deposited,
+    # nothing is eaten, the field stays identically 0, and the world is bit-exact the
+    # pre-carrion kernel (no genome change, so golden is untouched). Turn on with
+    # --set carrion_enabled=True. First cut: carnivores scavenge what they stand on
+    # (no retina channel for it yet, so no in_dim change) -- they stumble onto corpses
+    # rather than seeking them; folding carrion into the food retina is a later step.
+    carrion_enabled: bool = False
+    carrion_per_death: float = 3.0    # carrion deposited per death, scaled by body size
+    #                                   (a bigger corpse feeds more). Real carrion is
+    #                                   body mass, not the ~0 residual energy of a
+    #                                   starved/parched agent, so this is a fixed yield.
+    carrion_decay: float = 0.9        # per-step rot (~7-step half-life, like fear).
+    carrion_eat_rate: float = 1.0     # how fast a scavenger drains a cell's carrion.
+    carrion_energy: float = 1.4       # energy per unit carrion eaten (trophic loss vs
+    #                                   live prey: a corpse is worth less than a kill).
+
     # --- long-term spatial memory (see memory.py) ---
     memory_water_slots: int = 2       # one slot is fragile: a single stale entry
     #                                   blinds the agent. Two lets a lineage hold

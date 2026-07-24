@@ -63,6 +63,15 @@ class WorldState(NamedTuple):
     #                                              ground. Default off (fear_rate=0):
     #                                              stays identically zero, so the fold is
     #                                              a no-op -- same convention as trample.
+    carrion: jax.Array     # f32    [n_cells]    scavenging trophic pathway: a per-cell
+    #                                              store of corpse mass deposited on death
+    #                                              and rotting away over time, which
+    #                                              carnivores can eat as a second meat
+    #                                              source (docs/multispecies_feasibility.md
+    #                                              §4). Same per-cell shape and deposit-then-
+    #                                              read-next-step idiom as fear/trample.
+    #                                              Default off (carrion_enabled=False):
+    #                                              stays identically zero, a no-op.
     phase: jax.Array       # f32    scalar (0-d)  day-night clock in [0, 1): 0/1 = midnight,
     #                                              0.5 = midday (docs/day_night.md). Advanced
     #                                              by 1/day_length each step, wrapped mod 1;
@@ -237,6 +246,8 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         trample=jnp.zeros(cfg.n_cells),
         # No predator has lurked anywhere yet.
         fear=jnp.zeros(cfg.n_cells),
+        # No one has died anywhere yet.
+        carrion=jnp.zeros(cfg.n_cells),
         # The clock starts at midnight (phase 0). Stays here forever when
         # day_length=0, so the diel folds are bit-exact no-ops.
         phase=jnp.zeros(()),
