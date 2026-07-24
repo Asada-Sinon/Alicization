@@ -21,8 +21,8 @@ One message per frame, little-endian:
         forest_frac       f32
         fruit_total       f32
         phase             f32
-    agents  (n_agents * 32 bytes): x f32, y f32, diet f32, energy f32, id f32,
-                                   size f32, armor f32, spike f32
+    agents  (n_agents * 36 bytes): x f32, y f32, diet f32, energy f32, id f32,
+                                   size f32, armor f32, spike f32, venom f32
     plant   (grid*grid bytes):     u8, plant energy scaled to [0,255]
     fruit   (grid*grid bytes):     u8, fruit scaled by fruit_max
 
@@ -42,6 +42,11 @@ selection code is untouched. The header did NOT change. These three are the
 morphological traits the shader now draws per individual (docs/trait_defense_catalog.md):
 body-size scales the sprite, armour darkens/thickens it, spikes grow radial points --
 so trait evolution is visible on the creatures themselves, not just in plots.
+
+v9 appended `venom` (32 -> 36 bytes), the envenomation debuff a carnivore carries
+after biting a spiked prey (docs/trait_defense_landing.md §7). The shader tints a
+venomed agent sickly-green so the herbivore->carnivore retaliation is visible. Same
+append discipline: last per-agent field, header unchanged, prior offsets held.
 
 Terrain is static for a whole run and travels in its own one-shot message
 (`encode_terrain`, magic b"UNTR"), sent on connect and after a reset, rather than
@@ -101,7 +106,7 @@ def encode_terrain(height: np.ndarray, forest: np.ndarray, water_dist: np.ndarra
 
 def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
            energy: np.ndarray, size: np.ndarray, armor: np.ndarray, spike: np.ndarray,
-           plant: np.ndarray, fruit: np.ndarray, grid: int,
+           venom: np.ndarray, plant: np.ndarray, fruit: np.ndarray, grid: int,
            world_size: float, plant_max: float, fruit_max: float,
            metrics: dict) -> bytes:
     idx = np.nonzero(alive)[0]
@@ -125,7 +130,7 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
         float(metrics.get("phase", 0.0)),
     )
 
-    agents = np.empty((n, 8), dtype="<f4")
+    agents = np.empty((n, 9), dtype="<f4")
     agents[:, 0] = pos[idx, 0]
     agents[:, 1] = pos[idx, 1]
     agents[:, 2] = diet[idx]
@@ -134,6 +139,7 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
     agents[:, 5] = size[idx]                 # decoded body-size gene
     agents[:, 6] = armor[idx]                # decoded armour gene [0, ~0.5]
     agents[:, 7] = spike[idx]                # decoded spike gene  [0, ~0.5]
+    agents[:, 8] = venom[idx]                # active envenomation debuff
 
     plant_u8 = np.clip(plant / max(plant_max, 1e-6), 0.0, 1.0)
     plant_u8 = (plant_u8 * 255.0).astype(np.uint8)

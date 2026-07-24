@@ -67,10 +67,11 @@ class Simulation:
         size = np.asarray(size_of(s.genome, self.cfg))
         armor = np.asarray(armor_of(s.genome, self.cfg))
         spike = np.asarray(spike_of(s.genome, self.cfg))
+        venom = np.asarray(s.venom)              # per-agent debuff, already on state
         self.snapshot = protocol.encode(
             self.frame,
             np.asarray(s.alive), np.asarray(s.pos), np.asarray(s.diet),
-            np.asarray(s.energy), size, armor, spike,
+            np.asarray(s.energy), size, armor, spike, venom,
             np.asarray(s.plant), np.asarray(s.fruit),
             self.cfg.grid, self.cfg.world_size, self.cfg.plant_max,
             self.cfg.fruit_max, self.metrics,
@@ -98,6 +99,7 @@ class Simulation:
             "size": float(size_of(s.genome[i:i + 1], self.cfg)[0]),
             "armor": float(armor_of(s.genome[i:i + 1], self.cfg)[0]),
             "spike": float(spike_of(s.genome[i:i + 1], self.cfg)[0]),
+            "venom": float(s.venom[i]),
             "energy": float(s.energy[i]),
             "water": float(s.water[i]),
             "age": float(s.age[i]),

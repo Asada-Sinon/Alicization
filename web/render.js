@@ -228,6 +228,7 @@
     attribute float a_size;
     attribute float a_armor;
     attribute float a_spike;
+    attribute float a_venom;
     uniform mat4 u_viewProj;
     uniform float u_scale;
     uniform float u_hover;
@@ -236,6 +237,7 @@
     varying float v_energy;
     varying float v_armor;
     varying float v_spike;
+    varying float v_venom;
     void main() {
       gl_Position = u_viewProj * vec4(a_pos, a_h + u_hover, 1.0);
       float s = clamp(a_energy / 12.0, 0.2, 1.6);
@@ -254,6 +256,7 @@
       v_energy = a_energy;
       v_armor = a_armor;
       v_spike = a_spike;
+      v_venom = a_venom;
     }`;
 
   const POINT_FS = `
@@ -262,6 +265,7 @@
     varying float v_energy;
     varying float v_armor;
     varying float v_spike;
+    varying float v_venom;
     void main() {
       vec2 d = gl_PointCoord - vec2(0.5);
       float r = length(d);
@@ -284,6 +288,9 @@
       c = mix(c, vec3(grey * 0.55), clamp(v_armor, 0.0, 1.0) * 0.7);
       float rim = smoothstep(silh - 0.06 - 0.12 * v_armor, silh, r);
       c = mix(c, c * 0.3, rim * clamp(v_armor, 0.0, 1.0));
+      // Envenomation (docs/trait_defense_landing.md §7): a poisoned agent goes sickly
+      // green so the herbivore->carnivore retaliation is visible on the creature.
+      c = mix(c, vec3(0.35, 0.85, 0.30), clamp(v_venom, 0.0, 1.0) * 0.7);
       gl_FragColor = vec4(c, 1.0);
     }`;
 
@@ -342,6 +349,7 @@
         a_size: gl.getAttribLocation(this.pointProg, "a_size"),
         a_armor: gl.getAttribLocation(this.pointProg, "a_armor"),
         a_spike: gl.getAttribLocation(this.pointProg, "a_spike"),
+        a_venom: gl.getAttribLocation(this.pointProg, "a_venom"),
         u_viewProj: gl.getUniformLocation(this.pointProg, "u_viewProj"),
         u_scale: gl.getUniformLocation(this.pointProg, "u_scale"),
         u_hover: gl.getUniformLocation(this.pointProg, "u_hover"),
@@ -675,6 +683,8 @@
         gl.vertexAttribPointer(pt.a_armor, 1, gl.FLOAT, false, stride, 24);
         gl.enableVertexAttribArray(pt.a_spike);
         gl.vertexAttribPointer(pt.a_spike, 1, gl.FLOAT, false, stride, 28);
+        gl.enableVertexAttribArray(pt.a_venom);
+        gl.vertexAttribPointer(pt.a_venom, 1, gl.FLOAT, false, stride, 32);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this.agentHBuf);
         gl.bufferData(gl.ARRAY_BUFFER, this._hBuf.subarray(0, snap.n), gl.DYNAMIC_DRAW);
