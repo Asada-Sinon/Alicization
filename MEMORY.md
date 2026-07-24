@@ -39,3 +39,17 @@
 ---
 
 <!-- 真实的 [LEARN:tag] 条目从这一行下面开始，新的追加在最后。 -->
+
+### [LEARN:env] GPU 驱动会话中途被更新 → CUDA 降级 → JAX 悄悄回落 CPU
+- 现象: 探针跑了一个多小时不出结果，不是死锁。`nvidia-smi` 报 `Failed to initialize NVML:
+  Driver/library version mismatch`；`ps` 里探针进程累计 100+ 分钟 CPU 时间（GPU 作业不会这样，
+  说明在 CPU 上跑）。当天更早的同样探针在 `cuda:0` 上 2 分钟就跑完。
+- 原因: 后台包更新把 on-disk NVIDIA 驱动从 580.159→580.173，但**运行内核仍加载旧模块**
+  （`cat /proc/driver/nvidia/version` 显示旧版、`modinfo nvidia` 显示新版），userspace
+  libnvidia-ml 已是新版 → 版本不匹配 → CUDA 不可用 → JAX 回落 CPU（~100× 慢），不报错、只是慢。
+- 对策: 诊断三连——`nvidia-smi`（看 NVML mismatch）、`cat /proc/driver/nvidia/version` vs
+  `modinfo nvidia`（内核 vs on-disk）、`ps aux | grep probe`（看 CPU 时间是否暴涨）。修复要 sudo：
+  最省事是**重启**（新模块开机加载）；`rmmod nvidia*` 会被 GNOME 桌面（gdm/Xorg/gnome-shell）占住、
+  杀不动，别硬刚。**副作用**：驱动版本会改变 XLA 确定性算法选择，本混沌世界 smoke population 随之
+  翻动（半更新态跑出 1474、正常态 1549）——**别在坏驱动窗口 re-bless golden**（那次误 bless 又还原了）。
+- 来源: Session 2026-07-24

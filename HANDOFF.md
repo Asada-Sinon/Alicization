@@ -28,6 +28,38 @@
 
 ---
 
+## Session 2026-07-24
+
+- 完成: 昼夜系统整条线落地，8 次 commit 全部 push（`main...origin/main` 干净）。
+  - 先同步 `docs/TODO.md` 队列（`9fa7893`）。
+  - **昼夜 Phase 1**（`d9ae171`）：全局标量 `phase` 时钟 + 暗→视野 + move-only 热，默认关、
+    逐位可逆。加相位分箱探针 `scripts/probe_diel.py`。
+  - **五杠杆并行探索**（workflow，`c1d1477`）：move_heat/forage/activity_energy/pred_nocturnal/
+    torpor。判决：**"捕食者搬离河岸"结构不可达**（水太硬）；碰水杠杆靠剔除破渴死；水中性杠杆
+    安全但空间惰性；**pred_nocturnal 唯一干净阳性**（捕食风险昼夜错峰、还降渴死）。
+  - **pred_nocturnal 落地 + 验证 + 默认开启**（`9332323`/`271980d`/`8096bda`）：夜间捕食者射程↑。
+    amp=1.0 6 种子：hunt_success 夜−昼 +0.245（6/6）、thirst −13pp（6/6）、carn_frac +3.3pp（6/6）。
+    **已默认开启**：`day_length=400` + `pred_night_amp=1.0`，热/暗/觅食默认关（只跑这一条已验证
+    杠杆）。golden 重 bless。`--set day_length=0` 逐位回退。
+  - **Phase 2（演化空间通勤）证伪**（`45f482f`/`32c6a1a`）：`forage_heat` 底座落地（默认关），
+    `--set hidden=24/32` 加大脑。40k/24 与 100k/32/组合底座/2 种子一致：**没长出空间通勤、加大脑
+    不帮忙**。根因大概率缺动态选择压（静态地形）。同 `mutation_sigma` 类负结果。
+- PENDING: **下一个方向待用户定盘**——昼夜整条线已收口。候选：①密度 D（压 carn_frac，但注意
+  pred_nocturnal 刚把它抬了 +3.3pp、基线变了）；②别的。不要自己挑一个开跑。若继续碰昼夜：唯一
+  剩的实验是"演化通勤需要动态环境"（超出昼夜范围、大工程），按现有证据不建议。
+- 坑:
+  - **`day_length` 现在默认 400（昼夜默认开）**：所有实验默认带昼夜捕食。要昼夜前的旧基线做对照，
+    一律 `--set day_length=0`（编译期分支、逐位复现）。别拿旧分支数字直接比。
+  - **golden 已按昼夜默认开重 bless**（population 1549→1494、carn_frac 0.005→0.017 等）。
+  - **GPU 驱动会话中途被更新过一次**（580.159→580.173），当时半更新态让 CUDA 降级、JAX 悄悄回落
+    CPU、探针跑了一个多小时不出结果；`nvidia-smi` 报 NVML 版本不匹配是信号。重启修复。教训已进
+    `MEMORY.md`。当时慌乱中把 golden 误 bless 成坏驱动下的 1474（`c2dbefe`），重启后证实正确值是
+    1549、已还原（`8e29ada`）。
+  - 四个未选中的昼夜杠杆（forage 已入库作 Phase 2 底座；activity_energy/torpor/heat 只在 workflow
+    临时 worktree 跑过、**未入库**）。`.claude/worktrees/` 下有一堆死 agent 的孤儿 worktree，可清。
+  - `scripts/probe_diel.py` 已入库（相位分箱探针，通用）；Phase 2 探针 `phase2_probe.py` 在
+    scratchpad、未入库（一次性）。
+
 ## Session 2026-07-23
 
 - 完成: 三次 commit，一条线（种群密度校验 → 密度杠杆证伪 → 恐惧地景落地），全部已 push
