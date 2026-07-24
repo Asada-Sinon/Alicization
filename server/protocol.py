@@ -2,7 +2,7 @@
 
 One message per frame, little-endian:
 
-    header (68 bytes):
+    header (72 bytes):
         magic             4s   b"UNDW"
         frame             u32
         n_agents          u32
@@ -20,6 +20,7 @@ One message per frame, little-endian:
         mean_elevation    f32
         forest_frac       f32
         fruit_total       f32
+        phase             f32
     agents  (n_agents * 20 bytes): x f32, y f32, diet f32, energy f32, id f32
     plant   (grid*grid bytes):     u8, plant energy scaled to [0,255]
     fruit   (grid*grid bytes):     u8, fruit scaled by fruit_max
@@ -28,6 +29,11 @@ v6 added `fruit_total` and the fruit plane. Both went on the *end* of their
 section, which is why no existing client offset moved: the header grew 64 -> 68
 with the new float last, and the fruit plane follows the plant plane. Inserting
 either one further up would have silently shifted every read after it.
+
+v7 appended `phase` (the day-night clock in [0,1), 0/1=midnight, 0.5=midday) as
+the last header float (offset 68), header 68 -> 72. Same discipline: last field,
+so every prior offset held. The dashboard uses it to dim the world at night and
+show a clock, so the diel predation (default-on, docs/day_night.md) is visible.
 
 Terrain is static for a whole run and travels in its own one-shot message
 (`encode_terrain`, magic b"UNTR"), sent on connect and after a reset, rather than
@@ -56,7 +62,7 @@ import numpy as np
 
 MAGIC = b"UNDW"
 TERRAIN_MAGIC = b"UNTR"
-_HEADER = struct.Struct("<4sIII fffffffffffff")
+_HEADER = struct.Struct("<4sIII ffffffffffffff")
 _TERRAIN_HEADER = struct.Struct("<4sIf")
 
 
@@ -107,6 +113,7 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
         float(metrics.get("mean_elevation", 0.0)),
         float(metrics.get("forest_frac", 0.0)),
         float(metrics.get("fruit_total", 0.0)),
+        float(metrics.get("phase", 0.0)),
     )
 
     agents = np.empty((n, 5), dtype="<f4")

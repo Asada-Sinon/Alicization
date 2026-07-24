@@ -54,6 +54,18 @@
       border: 1px solid var(--rule); }
     #sigil::before { content: ""; position: absolute; inset: 5px;
       border: 1px solid rgba(74, 151, 234, 0.14); }
+    /* Day-night veil: darkens the world square toward a cold night-blue as the
+       clock (phase, from the wire) sweeps into night. Opacity set every frame in
+       main.js tick(); sits over the canvas but inside #sigil so the frame corners,
+       caption and terrain key stay bright. pointer-events:none keeps click-select. */
+    #nightveil { position: absolute; inset: 0; pointer-events: none; opacity: 0;
+      background: radial-gradient(ellipse at 50% 40%,
+        rgba(20, 32, 74, 0.55) 0%, rgba(6, 10, 30, 0.9) 100%);
+      transition: opacity 0.25s linear; mix-blend-mode: multiply; }
+    #dayclock { position: absolute; top: -24px; right: 0; pointer-events: none;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; color: var(--dim); letter-spacing: 0.08em; }
+    #dayicon { font-size: 13px; filter: saturate(0.85); }
     #sigil .cnr { position: absolute; width: 13px; height: 13px;
       border: 0 solid var(--gold); opacity: 0.55; }
     #sigil .tl { top: -1px; left: -1px;  border-top-width: 1px; border-left-width: 1px; }
@@ -176,6 +188,8 @@
     <div id="stage">
       <canvas id="view"></canvas>
       <div id="sigil" aria-hidden="true">
+        <div id="nightveil"></div>
+        <div id="dayclock"><span id="dayicon">☀</span><span id="daytime">昼</span></div>
         <span class="cnr tl"></span><span class="cnr tr"></span>
         <span class="cnr bl"></span><span class="cnr br"></span>
         <div id="sigilcap">观 测 法 阵</div>

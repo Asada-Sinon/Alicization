@@ -5,7 +5,7 @@
 
   const SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
   const STRIDE = 5;              // floats per agent: x, y, diet, energy, id
-  const HEADER_BYTES = 68;       // protocol v6
+  const HEADER_BYTES = 72;       // protocol v7 (phase appended)
   const PICK_RADIUS = 6.0;       // world units
   const HIST = 600;              // samples kept per series (~20s at 30fps)
 
@@ -36,6 +36,7 @@
     "sp_pop", "sp_carn", "sp_std", "sp_plant", "sp_vel", "sp_forest",
     "sigilcap", "sv_pop", "sv_carn", "sv_std", "sv_plant", "sv_cv", "sv_hv",
     "sv_forest", "elev", "diet", "energy", "water", "age", "winlen", "frame", "fps",
+    "nightveil", "dayicon", "daytime",
   ].forEach((id) => (ui[id] = $(id)));
 
   Renderer.init(canvas);
@@ -113,13 +114,14 @@
     const meanElev = dv.getFloat32(56, true);
     const forestFrac = dv.getFloat32(60, true);
     const fruitTotal = dv.getFloat32(64, true);
+    const phase = dv.getFloat32(68, true);       // day-night clock, 0/1=midnight
     const agents = new Float32Array(buffer, HEADER_BYTES, n * STRIDE);
     const planes = HEADER_BYTES + n * STRIDE * 4;
     const plant = new Uint8Array(buffer, planes, grid * grid);
     const fruit = new Uint8Array(buffer, planes + grid * grid, grid * grid);
     return { frame, n, grid, world, agents, plant, fruit, meanEnergy, plantTotal,
       meanAge, meanDiet, carnFrac, meanWater, dietStd, carnSpeed, herbSpeed,
-      meanElev, forestFrac, fruitTotal };
+      meanElev, forestFrac, fruitTotal, phase };
   }
 
   // Static terrain, sent once per world: 12-byte header then three u8 planes.
@@ -469,6 +471,22 @@
     sigil.style.height = r.size + "px";
   }
 
+  // Day-night clock (protocol v7 `phase`, docs/day_night.md): darken the world
+  // veil toward night and update the sun/moon clock. light = 0 at midnight, 1 at
+  // midday; the veil rides (1-light). phase starts at 0 (midnight) and sweeps, so a
+  // fresh run opens at night and brightens -- that is the real clock, not a bug.
+  function updateDayNight(phase) {
+    if (typeof phase !== "number") return;
+    const light = 0.5 * (1 - Math.cos(2 * Math.PI * phase));
+    ui.nightveil.style.opacity = (0.6 * (1 - light)).toFixed(3);
+    const isDay = light > 0.5;
+    ui.dayicon.textContent = isDay ? "☀" : "🌙";
+    const mins = Math.floor(phase * 1440) % 1440;
+    const hh = String(Math.floor(mins / 60)).padStart(2, "0");
+    const mm = String(mins % 60).padStart(2, "0");
+    ui.daytime.textContent = `${isDay ? "昼" : "夜"} ${hh}:${mm}`;
+  }
+
   function tick() {
     if (latest) {
       try { Renderer.draw(latest, STRIDE); } catch (e) { console.error(e); }
@@ -490,6 +508,7 @@
       ui.age.textContent = fmt(latest.meanAge, 0);
       ui.winlen.textContent = (hist.pop.length * speed).toLocaleString();
       ui.frame.textContent = latest.frame.toLocaleString();
+      updateDayNight(latest.phase);
       drawAllSparks();
     }
     frames++;
