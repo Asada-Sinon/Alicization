@@ -22,6 +22,7 @@
 | `docs/trait_stage0_analysis.md` | **Stage-0 三项零代码分析的结果（新低瓶颈 main 上重测）**：①G 矩阵——三对性状全正相关，成"食肉—大体型—高投资"综合征，**推翻**旧猜测（食肉携带的是更大而非更小体型）；②`invest_frac` 漂移——`mean_invest=0.384` 稳低于中性 0.5，**支持**年龄别死亡率理论，瓶颈 83%→55% 后方向不变、幅度按预期从旧 0.356 回升；③peer 跟随——**证否**：幼体比随机置换**更远**离成体，是隔离不是跟随 | 要给 Stage-1 性状实验打判据底、或问"peer 通道到底在不在工作"时 |
 | `docs/attack_range_redqueen.md` | **本项目第一个可测量的红皇后动态：可遗传 `attack_range` vs 对称猎物逃逸，6 配对种子实测。** 双侧成立且干净——逃逸只在功能开启时演化（1.91 vs 单侧中性 0.50，p=0.031）、滞后攻击约 3500 步、把有效攻击距离压回 6.28（≈6.0 起点），捕食者占比减半（13.7% vs 25%，p=0.031）。**但路线图 §7.3"双侧方差更高"被证伪**：两臂攻击距离都收敛到能量税决定的同一均衡（约 8.2）、方差无差异，红皇后是达到协同均衡的瞬态而非失控军备竞赛。代价一律走能量账本（`attack_cost`/`escape_cost`），未碰 `carnivore_riparian.md` 那批捕食参数 | 讨论协同演化/军备竞赛/红皇后、或想动 attack/escape 基因与其代价时 |
 | `docs/trait_defense_catalog.md` | **可见形态『防御』性状候选目录（真实文献支撑）。** 8 类候选（护甲/尖刺/诱导型/警戒色+毒/隐蔽/集群稀释/体型/速度）逐条给真实生物学依据（stickleback Eda、Daphnia neckteeth、newt-snake TTX 等，附 DOI）+ 本世界 predation 落地锚点 + A/B/可见性/runaway 判定。头 3 推荐：护甲+尖刺+警戒色。dilution 不推荐（群属性非形态）。**护甲的 A/B 归类与 feasibility 篇有意留张力**（真实代价是生长账=B 类，本世界改能量账=A 类） | 讨论"能加哪些看得见的防御性状"、找防御设计的真实依据时 |
+| `docs/trait_defense_landing.md` | **armor（厚皮）+ spike（尖刺）首个落地 + 可视化实录。** trait_dim 5→7、predation 减伤/反伤 + metabolize 能量税、gene=0 中性、四类单元测试全绿、golden 重 bless（1494→1555 等）。wire v8 每 agent 追加 size/armor/spike、shader 画厚描边+放射尖刺+点大小、inspector 加厚皮/尖刺行，headless chromium + 独立 shader 测试双重截图验证。**关键边界：机制+可见已落地，但「防御是否真会演化」未验证（短跑仅近中性漂变），下一步是 6 种子 P1-P3 实验** | 想知道 armor/spike 怎么实现的、可视化怎么接的、或要接着做防御演化实验时 |
 | `docs/trait_addition_feasibility.md` | **加入防御性状做演化的可行性判决 + 首个落地规格。** 工程（最小钩子集、trait_dim 5→6、golden 必重 bless、可见性管线三处 + 真尖刺几何超出 `gl.POINTS` 的天花板、测试契约）+ 演化（代价货币、防御是成体向 A 类不被瓶颈删失、红皇后 escape 作存在性证明、捕食是活的动态选择压不重蹈通勤证伪、diet 门控防 runaway）。**判决：建议做，首推厚皮/减伤 armor**（escape 结构孪生、个体级信号最干净、避开尖刺几何死胡同）+ 逐文件规格 + 3 条可证伪预测 + 6 种子测试设计 | 真要动手加防御性状、或问"这个能不能做、先做哪个"时 |
 | `docs/water_fix_decision.md` | **三候选水修复对比与选型判决（已落地）。** buffer/provisioning/retune 对着用户三条判据选型，只有 retune 全过。**已实现为 main 默认值**（`543483a`）：base/move_water_cost 减半 + carn_cost 0.15。实测 thirst 83%→55%、捕食者离水 11.4→25.3、carn_frac 稳在 22% | 想知道水系统为什么这么调、或要再动水参数时（先读它的"窄工作点"警告） |
 | `docs/web_cleanup_audit.md` | **`web/` 前端清理审计（行为/视觉零变化）。** 无死代码；落地两类性能点（`render.js` 缓存 GL location + 采样器只绑一次、`main.js` 缓存每帧 DOM 元素）与两处过期注释（`--plant`、`C` 颜色块）。cross-file 契约全程未碰，`--contracts` 21 项全过，render 改动按 §10 截图验过 | 要动 `web/` 前端、或想知道哪些清理已做过时 |
@@ -50,9 +51,11 @@
 
 ## 队列
 
-### 当前主线：可见形态防御性状——调研已落地，实现待用户点头
+### 当前主线：可见形态防御性状——armor+spike 已落地+可视化，演化验证待跑
 
 水系统 ✅、性状进化两波 ✅、优化/清理审计 ✅、恐惧地景 ✅、昼夜系统 ✅ 均已落地。
+**防御性状 armor+spike ✅ 机制+可视化已落地**（`docs/trait_defense_landing.md`），
+**但「是否真会演化」未验证**——下一步是 6 种子 P1-P3 实验（见下）。
 
 **可见形态防御性状（`docs/trait_defense_catalog.md` + `docs/trait_addition_feasibility.md`，
 2026-07-24，本轮只出报告）**：用户要「看得见的性状演化」（尖刺/厚皮）。调研判决——防御是
