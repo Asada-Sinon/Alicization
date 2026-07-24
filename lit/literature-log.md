@@ -43,6 +43,20 @@
 
 | citekey | 标题 | 年份 | 状态 | 与本项目的关系 | 笔记路径 | 已并入 docs/ |
 | --- | --- | --- | --- | --- | --- | --- |
+| colosimo2005 | Widespread Parallel Evolution in Sticklebacks by Repeated Fixation of Ectodysplasin Alleles（10.1126/science.1107239） | 2005 | 略读 | 护甲可作单基因可逆开关，支持护甲做低维可遗传性状 | notes/papers/colosimo2005.md | `docs/trait_defense_catalog.md` 护甲/棘刺节 |
+| barrett2008 | Natural Selection on a Major Armor Gene in Threespine Stickleback（10.1126/science.1159978） | 2008 | 精读 | 护甲代价=生长拖累的野外实测，喂本项目代价货币原则；也是「护甲在本世界是 A 还是 B 类取决于代价记哪本账」这条张力的出处 | notes/papers/barrett2008.md | `docs/trait_defense_catalog.md` 护甲节 + `docs/trait_addition_feasibility.md` §B.2 |
+| harvell1990 | The Ecology and Evolution of Inducible Defenses（10.1086/416841） | 1990 | 略读 | 诱导 vs 组成型判据；本项目昼夜波动满足「风险波动」 | notes/papers/harvell1990.md | `docs/trait_defense_catalog.md` 诱导型防御节 |
+| tollrianharvell1999 | The Ecology and Evolution of Inducible Defenses（book, ISBN 9780691004945 / 10.1515/9780691228198） | 1999 | 待读 | 诱导型防御框架专著，代价证据来源 | 未写 | `docs/trait_defense_catalog.md` 诱导型防御节（作背景锚点） |
+| tollrian1993 | Neckteeth formation in Daphnia pulex...（10.1093/plankt/15.11.1309） | 1993 | 略读 | 诱导强度随风险连续标定的实证 | notes/papers/tollrian1993.md | `docs/trait_defense_catalog.md` 诱导型防御节 |
+| hoogland1956 | The Spines of Sticklebacks as Means of Defence against Predators（10.1163/156853956X00156，DOI 后缀未独立确认） | 1956 | 略读 | 反击型防御经典，对应「防御压低捕食者密度」 | notes/papers/hoogland1956.md | `docs/trait_defense_catalog.md` 反击/尖刺节 |
+| mappes2005 | The complex business of survival by aposematism（10.1016/j.tree.2005.07.011） | 2005 | 待读 | 警戒色+化学防御综述；依赖捕食者学习 | 未写 | `docs/trait_defense_catalog.md` 警戒色节 |
+| stevens2009 | Animal camouflage: current issues and new perspectives（10.1098/rstb.2008.0217） | 2009 | 待读 | 隐蔽色机制分类，作用于「被检测」阶段 | 未写 | `docs/trait_defense_catalog.md` 隐蔽色节 |
+| cuthill2005 | Disruptive coloration and background pattern matching（10.1038/nature03312） | 2005 | 待读 | 破坏性色斑降低鸟类捕食的野外实验证据 | 未写 | `docs/trait_defense_catalog.md` 隐蔽色节 |
+| hamilton1971 | Geometry for the selfish herd（10.1016/0022-5193(71)90189-5） | 1971 | 略读 | 稀释效应理论基石，行为性状可由现有邻居系统承载 | notes/papers/hamilton1971.md | `docs/trait_defense_catalog.md` 集群稀释节 |
+| vermeij1994 | The evolutionary interaction among species: selection, escalation, and coevolution（10.1146/annurev.es.25.110194.001251） | 1994 | 待读 | escalation vs coevolution 框架，军备竞赛背景 | 未写 | `docs/trait_defense_catalog.md` 军备竞赛节 |
+| brodie2005 | Parallel arms races between garter snakes and newts...（10.1007/s10886-005-1345-x） | 2005 | 略读 | 双侧协同演化真实范例，补 attack_range_redqueen 背景 | notes/papers/brodie2005.md | `docs/trait_defense_catalog.md` 军备竞赛节（交叉引用 `docs/attack_range_redqueen.md`） |
+| hague2018 | Large-effect mutations generate trade-off between predatory and locomotor ability...（10.1002/evl3.76） | 2018 | 略读 | 军备升级的运动代价实测，支持给对抗性状挂税 | notes/papers/hague2018.md | `docs/trait_defense_catalog.md` 军备竞赛节 |
+| kastner2024 | Gape-limited invasive predator frequently kills avian prey too large to swallow（10.1002/ece3.11598） | 2024 | 待读 | size refuge 机制佐证（非综述、强度弱） | 未写 | `docs/trait_defense_catalog.md` 体型/速度节（标 gap） |
 
 ## 检索记录
 
@@ -52,6 +66,15 @@
 
 | 日期 | query | 工具 | 命中 → 入档 | 结论 |
 | --- | --- | --- | --- | --- |
+| 2026-07-24 | stickleback Eda lateral plate armor predation Colosimo | WebSearch | 8 → 2 | Colosimo2005 定位 + Barrett2008 代价，护甲节双锚点 |
+| 2026-07-24 | Tollrian Harvell inducible defenses cost / Harvell 1990 QRB / Daphnia neckteeth kairomone | WebSearch×3 | 多 → 3 | Harvell1990 判据 + Tollrian1993 剂量依赖 + 1999 专著 |
+| 2026-07-24 | Hamilton 1971 selfish herd JTB | WebSearch | 9 → 1 | Hamilton1971 DOI 确认 |
+| 2026-07-24 | Brodie garter snake newt TTX / Hague 2018 trade-off | WebSearch×2 | 多 → 2 | Brodie2005 界面 + Hague2018 运动代价 |
+| 2026-07-24 | Mappes Marples Endler aposematism TREE | WebSearch | 9 → 1 | Mappes2005 DOI 确认 |
+| 2026-07-24 | Vermeij escalation / 1994 Annu Rev | WebSearch×2 | 多 → 1 | Vermeij1994 DOI 确认；1987 专著无 DOI |
+| 2026-07-24 | Stevens Merilaita camouflage / Cuthill disruptive coloration Nature | WebSearch×2 | 多 → 2 | Stevens2009 综述 + Cuthill2005 实验 |
+| 2026-07-24 | Hoogland Tinbergen stickleback spines defence Behaviour | WebSearch + WebFetch(Brill 403) | 9 → 1 | venue 确认，DOI 后缀未独立确认 |
+| 2026-07-24 | body size refuge gape-limited escape speed antipredator review | WebSearch | 8 → 1 | 无综述锚点，仅零散实证（kastner2024），标 gap |
 
 <!--
 示例行（真实检索请照这个粒度写，不要照抄这两行的内容——它们只是格式演示）：
