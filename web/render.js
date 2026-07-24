@@ -225,12 +225,17 @@
     attribute float a_h;
     attribute float a_diet;
     attribute float a_energy;
+    attribute float a_size;
+    attribute float a_armor;
+    attribute float a_spike;
     uniform mat4 u_viewProj;
     uniform float u_scale;
     uniform float u_hover;
     uniform float u_sizeRef;
     varying float v_diet;
     varying float v_energy;
+    varying float v_armor;
+    varying float v_spike;
     void main() {
       gl_Position = u_viewProj * vec4(a_pos, a_h + u_hover, 1.0);
       float s = clamp(a_energy / 12.0, 0.2, 1.6);
@@ -239,25 +244,47 @@
       // count the rasterizer does NOT divide by w -- so without the explicit
       // u_sizeRef/w term every agent would be the same size regardless of
       // camera distance, which would defeat the point of a perspective camera.
-      float base = u_scale * (2.5 + 3.0 * s + 2.0 * a_diet);
-      gl_PointSize = clamp(base * (u_sizeRef / max(gl_Position.w, 0.001)), 1.0, 64.0);
+      // The body-size gene (a_size, neutral 1.0) scales the sprite directly, and
+      // spikes add a little headroom so the points have room to draw outside the
+      // body -- so morphology is legible per individual (docs/trait_defense_catalog.md).
+      float base = u_scale * (2.5 + 3.0 * s + 2.0 * a_diet) * a_size;
+      gl_PointSize = clamp(base * (1.0 + 0.35 * a_spike)
+                           * (u_sizeRef / max(gl_Position.w, 0.001)), 1.0, 96.0);
       v_diet = a_diet;
       v_energy = a_energy;
+      v_armor = a_armor;
+      v_spike = a_spike;
     }`;
 
   const POINT_FS = `
     precision mediump float;
     varying float v_diet;
     varying float v_energy;
+    varying float v_armor;
+    varying float v_spike;
     void main() {
       vec2 d = gl_PointCoord - vec2(0.5);
-      if (dot(d, d) > 0.25) discard;
+      float r = length(d);
+      float ang = atan(d.y, d.x);
+      // Spikes (docs/trait_defense_catalog.md): 8 sharp radial points whose height
+      // grows with the spike gene. cos(8*ang) peaks at each spoke; the high power
+      // narrows each lobe into a spike rather than a bump. No gene -> a plain disc.
+      float spike = v_spike * 0.28 * pow(max(cos(ang * 8.0), 0.0), 6.0);
+      float silh = 0.40 + spike;
+      if (r > silh) discard;
       // purple (herbivore) -> red (carnivore)
       vec3 herb = vec3(0.62, 0.32, 0.92);
       vec3 carn = vec3(0.95, 0.25, 0.22);
       vec3 c = mix(herb, carn, clamp(v_diet, 0.0, 1.0));
       float b = clamp(0.5 + v_energy * 0.05, 0.5, 1.0);
-      gl_FragColor = vec4(c * b, 1.0);
+      c = c * b;
+      // Armour: a darker, desaturated body with a hard dark rim -- reads as a
+      // thick hide/shell that thickens with the gene.
+      float grey = dot(c, vec3(0.333));
+      c = mix(c, vec3(grey * 0.55), clamp(v_armor, 0.0, 1.0) * 0.7);
+      float rim = smoothstep(silh - 0.06 - 0.12 * v_armor, silh, r);
+      c = mix(c, c * 0.3, rim * clamp(v_armor, 0.0, 1.0));
+      gl_FragColor = vec4(c, 1.0);
     }`;
 
   // Vertical exaggeration for the terrain mesh. The wire format only sends
@@ -312,6 +339,9 @@
         a_h: gl.getAttribLocation(this.pointProg, "a_h"),
         a_diet: gl.getAttribLocation(this.pointProg, "a_diet"),
         a_energy: gl.getAttribLocation(this.pointProg, "a_energy"),
+        a_size: gl.getAttribLocation(this.pointProg, "a_size"),
+        a_armor: gl.getAttribLocation(this.pointProg, "a_armor"),
+        a_spike: gl.getAttribLocation(this.pointProg, "a_spike"),
         u_viewProj: gl.getUniformLocation(this.pointProg, "u_viewProj"),
         u_scale: gl.getUniformLocation(this.pointProg, "u_scale"),
         u_hover: gl.getUniformLocation(this.pointProg, "u_hover"),
@@ -638,6 +668,13 @@
         gl.vertexAttribPointer(pt.a_diet, 1, gl.FLOAT, false, stride, 8);
         gl.enableVertexAttribArray(pt.a_energy);
         gl.vertexAttribPointer(pt.a_energy, 1, gl.FLOAT, false, stride, 12);
+        // offset 16 is `id` (read on the CPU for picking, not needed in the shader).
+        gl.enableVertexAttribArray(pt.a_size);
+        gl.vertexAttribPointer(pt.a_size, 1, gl.FLOAT, false, stride, 20);
+        gl.enableVertexAttribArray(pt.a_armor);
+        gl.vertexAttribPointer(pt.a_armor, 1, gl.FLOAT, false, stride, 24);
+        gl.enableVertexAttribArray(pt.a_spike);
+        gl.vertexAttribPointer(pt.a_spike, 1, gl.FLOAT, false, stride, 28);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this.agentHBuf);
         gl.bufferData(gl.ARRAY_BUFFER, this._hBuf.subarray(0, snap.n), gl.DYNAMIC_DRAW);

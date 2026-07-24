@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 
 from server import protocol
 from underworld import Config, new_world
-from underworld.state import size_of
+from underworld.state import armor_of, size_of, spike_of
 
 
 class Simulation:
@@ -61,10 +61,17 @@ class Simulation:
     def _build_snapshot(self):
         s = self.state
         self.frame += 1
+        # Decode the three morphological traits the shader draws per individual
+        # (docs/trait_defense_catalog.md). Cheap per-agent scalars off the genome,
+        # same as size_of already was for the inspector.
+        size = np.asarray(size_of(s.genome, self.cfg))
+        armor = np.asarray(armor_of(s.genome, self.cfg))
+        spike = np.asarray(spike_of(s.genome, self.cfg))
         self.snapshot = protocol.encode(
             self.frame,
             np.asarray(s.alive), np.asarray(s.pos), np.asarray(s.diet),
-            np.asarray(s.energy), np.asarray(s.plant), np.asarray(s.fruit),
+            np.asarray(s.energy), size, armor, spike,
+            np.asarray(s.plant), np.asarray(s.fruit),
             self.cfg.grid, self.cfg.world_size, self.cfg.plant_max,
             self.cfg.fruit_max, self.metrics,
         )
@@ -89,6 +96,8 @@ class Simulation:
             "alive": True,
             "diet": float(s.diet[i]),
             "size": float(size_of(s.genome[i:i + 1], self.cfg)[0]),
+            "armor": float(armor_of(s.genome[i:i + 1], self.cfg)[0]),
+            "spike": float(spike_of(s.genome[i:i + 1], self.cfg)[0]),
             "energy": float(s.energy[i]),
             "water": float(s.water[i]),
             "age": float(s.age[i]),

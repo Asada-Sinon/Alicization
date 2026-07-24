@@ -4,8 +4,8 @@
   "use strict";
 
   const SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
-  const STRIDE = 5;              // floats per agent: x, y, diet, energy, id
-  const HEADER_BYTES = 72;       // protocol v7 (phase appended)
+  const STRIDE = 8;              // floats per agent: x, y, diet, energy, id, size, armor, spike
+  const HEADER_BYTES = 72;       // protocol v8 (size/armor/spike appended to agent record; header unchanged)
   const PICK_RADIUS = 6.0;       // world units
   const HIST = 600;              // samples kept per series (~20s at 30fps)
 
@@ -310,7 +310,8 @@
     $("itype").textContent = "在世界中点选一个个体，解析它的摇光";
     $("itype").className = "empty";
     $("itype").style.color = "";
-    ["i_id", "i_diet", "i_energy", "i_water", "i_size", "i_age", "i_gen", "i_speed",
+    ["i_id", "i_diet", "i_energy", "i_water", "i_size", "i_armor", "i_spike",
+      "i_age", "i_gen", "i_speed",
       "i_food", "i_meat", "i_dmg", "i_drink", "i_turn", "i_thrust"].forEach(
       (id) => ($(id).textContent = "–"));
     $("ibar").style.left = "0%";
@@ -420,6 +421,8 @@
     $("i_energy").textContent = d.energy.toFixed(1);
     $("i_water").textContent = d.water.toFixed(1);
     $("i_size").textContent = d.size.toFixed(2);
+    $("i_armor").textContent = (d.armor !== undefined ? d.armor.toFixed(3) : "–");
+    $("i_spike").textContent = (d.spike !== undefined ? d.spike.toFixed(3) : "–");
     $("i_age").textContent = d.age.toFixed(0);
     $("i_gen").textContent = d.generation.toFixed(0);
     $("i_speed").textContent = d.speed.toFixed(1);
