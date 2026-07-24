@@ -53,3 +53,13 @@
   杀不动，别硬刚。**副作用**：驱动版本会改变 XLA 确定性算法选择，本混沌世界 smoke population 随之
   翻动（半更新态跑出 1474、正常态 1549）——**别在坏驱动窗口 re-bless golden**（那次误 bless 又还原了）。
 - 来源: Session 2026-07-24
+
+### [LEARN:tooling] 跑实验前先提交，别在脏树上跑
+- 现象: Experiment D（L6 密度制约）的 provenance.txt 记 git HEAD=f952f35，但当时 L6 代码在
+  工作树里尚未提交（现 bd8107f）。result-analyst 核对时发现该 HEAD 无 `density_repro_penalty`
+  字段，provenance 与实际运行码不符。
+- 原因: 先实现→先跑实验→后提交。run_headless 读的是工作树里的脏码，但 `git rev-parse HEAD`
+  记的是上一个 commit，两者不一致 → 结果无法从记录的 HEAD 单独复现。
+- 对策: **跑任何要落 provenance 的实验之前先 commit**（哪怕默认关的机制也先提交）。三臂同码时
+  实验内归因仍干净，但可复现性打折。/exp 第 3 步「跑之前 git status 干净」就是防这个。
+- 来源: Session 2026-07-25
