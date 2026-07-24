@@ -68,8 +68,13 @@ def build_step(cfg: Config, terrain):
         table2 = spatial.build_table(state, cfg)
         nbr2 = spatial.gather_neighbors(state, table2, cfg)
         _d2, dist2, valid2 = spatial.geometry(state, nbr2, cfg)
+        # `light` (0 midnight .. 1 midday) drives the nocturnal predation boost;
+        # it is computed just below for thirst too. Compute it here first so the
+        # (second) predation pass sees it. None when day_length=0 -> bit-exact.
+        light = (0.5 * (1.0 - jnp.cos(2.0 * jnp.pi * state.phase))
+                 if cfg.day_length > 0 else None)
         energy, meat_gain, damage, water, meat_water_gain, water_damage = \
-            dynamics.predation(state, nbr2, dist2, valid2, cfg)
+            dynamics.predation(state, nbr2, dist2, valid2, cfg, light)
         # The red-queen taxes are levied on the ENERGY ledger in metabolize (never
         # thirst); read the two genes per-agent here, same cheap recompute as `size`.
         attack_range = attack_range_of(state.genome, cfg)
@@ -78,11 +83,8 @@ def build_step(cfg: Config, terrain):
             energy, thrust, state.diet, climb, state.alive, cfg, size,
             attack_range, escape)
         # Day-night heat (docs/day_night.md): midday raises evaporative water loss.
-        # `light` is 0 at midnight, 1 at midday, read from the clock left by the
-        # previous step (same step-start read as the sensor darkening). Gated on
-        # day_length>0 so `thirst` gets None when off and is bit-exact the old call.
-        light = (0.5 * (1.0 - jnp.cos(2.0 * jnp.pi * state.phase))
-                 if cfg.day_length > 0 else None)
+        # Reuses `light` computed above for the nocturnal predation boost (0 at
+        # midnight, 1 at midday; None when day_length=0 -> thirst is bit-exact old).
         water = dynamics.thirst(water, thrust, state.alive, cfg, size, light)
         state = state._replace(
             energy=energy, water=water, age=state.age + state.alive,

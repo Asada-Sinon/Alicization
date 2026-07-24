@@ -68,7 +68,8 @@ def main(steps: int = 10000, seed: int = 0, overrides: dict | None = None,
     print(f"{'metric':>18} {'day':>8} {'night':>8} {'night-day':>10}")
     out = {}
     for field in ("carn_water_dist", "herb_water_dist", "water_bound_frac",
-                  "carn_speed", "herb_speed", "carnivore_frac", "population"):
+                  "carn_speed", "herb_speed", "carnivore_frac", "population",
+                  "hunt_success"):
         day, night = split(field)
         out[f"{field}_day"] = day
         out[f"{field}_night"] = night

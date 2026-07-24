@@ -139,7 +139,7 @@ def drink(state: WorldState, terrain, cfg: Config, size: jax.Array):
 
 
 def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
-              valid: jax.Array, cfg: Config):
+              valid: jax.Array, cfg: Config, light: jax.Array | None = None):
     """Neighbour-based carnivory. Each agent attacks the *nearest eligible prey*
     among its neighbours -- an agent that is `diet_delta` more herbivorous than
     itself, within `attack_range`. Damage is scatter-added onto prey, capped by
@@ -168,6 +168,15 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
         reach = cfg.attack_range
     if cfg.prey_escape_enabled:
         reach = reach - escape_of(state.genome, cfg)[safe]         # [n, M]
+    # Nocturnal predation boost (docs/day_night.md §4): predators reach farther in
+    # the dark. `light` is 0 at midnight, 1 at midday, so the boost peaks at night.
+    # Clipped to the sense cell so a boosted bite can never exceed what the 3x3
+    # neighbour block gathered (the same ceiling `attack_max` is guarded against).
+    # `light is not None` only when day_length>0; otherwise this is absent and
+    # predation is bit-exact the pre-clock kernel.
+    if light is not None:
+        reach = reach * (1.0 + cfg.pred_night_amp * (1.0 - light))
+        reach = jnp.minimum(reach, cfg.world_size / cfg.sense_grid)
     eligible = valid & (d_i - d_j > cfg.diet_delta) & (dist < reach) & (e_j > 0.0)
 
     BIG = 1e9

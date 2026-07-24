@@ -630,6 +630,21 @@ class Config:
     #                               darkness never worsens water-finding -- the
     #                               standing juvenile-thirst risk (landscape_of_fear
     #                               §3.2). Read only when day_length>0.
+    pred_night_amp: float = 0.0   # nocturnal predation boost: at night a carnivore's
+    #                               effective bite reach is scaled by
+    #                               (1 + pred_night_amp*(1-light)), strongest at
+    #                               midnight (light=0), zero at midday. This is the
+    #                               ONE day-night lever the seed-0 sweep found clean
+    #                               (docs/day_night.md §4): it makes predation risk
+    #                               DIEL (hunt_success splits night>day, monotone in
+    #                               amp) with a tiny population swing and thirst that
+    #                               FALLS (prey lost to predation, not thirst) --
+    #                               unlike the water-taxing levers that cull. Boosted
+    #                               reach is clipped to the sense cell (world_size/
+    #                               sense_grid) so a bite never reaches prey the
+    #                               neighbour table did not gather. Default 0.0 =
+    #                               off; read only when day_length>0 (predation gets
+    #                               light=None otherwise, a bit-exact no-op).
 
     # --- rng ---
     seed: int = 0
