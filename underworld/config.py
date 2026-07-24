@@ -602,9 +602,15 @@ class Config:
     # every downstream fold (sensor darkening, thirst heat) is absent from the jit
     # -- bit-exact the pre-clock baseline, and NO shape changes anywhere, so no
     # population is invalidated and golden holds. Same convention as `fear_rate=0`.
-    day_length: int = 0           # steps in one full day-night cycle; 0 disables
-    #                               (compile-time no-op, bit-exact old behaviour).
-    #                               Proposed 6-seed working value: 400. Timescale
+    day_length: int = 400         # steps in one full day-night cycle; 0 disables
+    #                               (compile-time no-op, bit-exact the pre-clock
+    #                               kernel). DEFAULT-ON at 400 as of the pred_nocturnal
+    #                               landing (docs/day_night.md §5): the shipped world
+    #                               now runs a diel clock whose ONLY behavioural lever
+    #                               is nocturnal predation (pred_night_amp below) --
+    #                               heat/darkness/forage are defaulted OFF (they cull
+    #                               or are inert). `--set day_length=0` recovers the
+    #                               pre-day-night baseline bit-exact for ablation. Timescale
     #                               (docs/day_night.md): juvenile thirst death
     #                               ~52 steps, fear/trample half-life ~69, memory
     #                               half-life 346, max_age 3000 -- 400 gives adults
@@ -612,7 +618,11 @@ class Config:
     #                               fear half-life so the rhythm is not smeared out;
     #                               juveniles see under one cycle, so their thirst
     #                               relief is indirect (via adult commuting).
-    heat_water_amp: float = 0.5   # relative rise in the MOVEMENT water cost at peak
+    heat_water_amp: float = 0.0   # DEFAULT OFF (was a candidate lever): even taxing
+    #                               only movement water, midday heat culls via the
+    #                               thirst bottleneck (docs/day_night.md §4, +18-21pp
+    #                               thirst). Kept for ablation only; set ~1-2 to study.
+    #                               --- relative rise in the MOVEMENT water cost at peak
     #                               midday heat: thirst charges move_water_cost*thrust*
     #                               (1 + heat_water_amp*light), so foraging/travelling
     #                               at midday costs more water while RESTING near water
@@ -622,7 +632,11 @@ class Config:
     #                               earlier flat multiplier on base+move was a seed-0
     #                               thirst bomb (+18-21pp, midday culling); see
     #                               docs/day_night.md §4. Read only when day_length>0.
-    night_vision_floor: float = 0.4  # inter-agent vision multiplier at midnight
+    night_vision_floor: float = 1.0  # DEFAULT OFF (1.0 = no darkening): the darkness
+    #                               lever was measured SAFE but spatially inert
+    #                               (docs/day_night.md §4), so it is not part of the
+    #                               default day/night world; set ~0.4 to study nocturnal
+    #                               ambush. --- inter-agent vision multiplier at midnight
     #                               (1.0 = no darkening). Night shrinks how far an
     #                               agent can SEE OTHER AGENTS (prey/pred/peer), the
     #                               nocturnal-ambush lever; the water and food
@@ -630,7 +644,12 @@ class Config:
     #                               darkness never worsens water-finding -- the
     #                               standing juvenile-thirst risk (landscape_of_fear
     #                               §3.2). Read only when day_length>0.
-    pred_night_amp: float = 0.0   # nocturnal predation boost: at night a carnivore's
+    pred_night_amp: float = 1.0   # DEFAULT-ON at 1.0 (docs/day_night.md §5, user
+    #                               chose half-strength): 6-seed validated -- hunt_success
+    #                               night-day +0.245 (6/6), thirst -13pp (6/6, relieves
+    #                               the bottleneck), carn_frac +3.3pp (6/6, the cost).
+    #                               amp=2.0 gave a stronger signal but +6pp carn_frac.
+    #                               --- nocturnal predation boost: at night a carnivore's
     #                               effective bite reach is scaled by
     #                               (1 + pred_night_amp*(1-light)), strongest at
     #                               midnight (light=0), zero at midday. This is the
