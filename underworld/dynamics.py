@@ -249,15 +249,30 @@ def thirst(water: jax.Array, thrust: jax.Array, alive: jax.Array,
     water loss, like energy loss, is metabolic/surface-area driven rather than a
     simple volume effect (that's `water_max` in `drink`, which scales at 1.0).
 
-    The day-night heat term (docs/day_night.md): midday heat raises evaporative
-    loss, so water cost is scaled by (1 + heat_water_amp*light) where `light` is
-    0 at midnight and 1 at midday. `light` is optional (default None) so the
-    pre-clock call signature and the thirst unit test still work unchanged; it is
-    only passed by `step.py` when `day_length > 0`, matching the compile-time
-    gating of `metabolize`'s red-queen taxes.
+    The day-night heat term (docs/day_night.md) taxes ACTIVITY, not rest: only the
+    movement (panting) component is scaled by midday heat -- `move_water_cost *
+    thrust * (1 + heat_water_amp*light)`, with `light` 0 at midnight and 1 at
+    midday. The resting `base_water_cost` is left alone, so an agent can sit or
+    drink near water at midday for its ordinary cost and pays the heat penalty only
+    when it forages or travels. That makes "forage in the cool night, rest by the
+    water at midday" a survivable commute rather than a death tax: the seed-0 probe
+    showed a flat multiplier on base+move drove thirst mortality +18-21pp over the
+    60.1% baseline and culled the far-from-water population at midday (an artifact
+    that faked a day/night distance gap), docs/day_night.md §4. `light` is optional
+    (default None) so the pre-clock call signature and the thirst unit test still
+    work unchanged and bit-exact; it is only passed by `step.py` when
+    `day_length > 0`, matching the compile-time gating of `metabolize`'s taxes.
     """
     cost = (cfg.base_water_cost + cfg.move_water_cost * thrust)
     if light is not None:
-        cost = cost * (1.0 + cfg.heat_water_amp * light)
+        # Extra panting cost from midday heat, ADDED onto the movement term only
+        # (base rest cost untouched). Written as an addition rather than folding a
+        # (1+heat*light) factor into the line above so the light-None path is the
+        # byte-identical float expression the pre-clock kernel ran -- this world is
+        # chaotic enough that even a 1-ULP rounding change from restructuring the
+        # expression cascades into a visibly different smoke population, so the
+        # day_length=0 no-op must reuse the exact original ops, not merely an
+        # algebraically-equal rewrite.
+        cost = cost + cfg.move_water_cost * thrust * cfg.heat_water_amp * light
     cost = cost * (size ** 0.75) * alive
     return water - cost

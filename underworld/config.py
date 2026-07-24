@@ -612,12 +612,16 @@ class Config:
     #                               fear half-life so the rhythm is not smeared out;
     #                               juveniles see under one cycle, so their thirst
     #                               relief is indirect (via adult commuting).
-    heat_water_amp: float = 0.5   # relative rise in water cost at peak midday heat:
-    #                               thirst charges (1 + heat_water_amp*light)x, so
-    #                               midday is expensive to be active/away from water
-    #                               and the cool night is cheap -- the "drink at cool
-    #                               hours, don't linger midday" pressure. Read only
-    #                               when day_length>0.
+    heat_water_amp: float = 0.5   # relative rise in the MOVEMENT water cost at peak
+    #                               midday heat: thirst charges move_water_cost*thrust*
+    #                               (1 + heat_water_amp*light), so foraging/travelling
+    #                               at midday costs more water while RESTING near water
+    #                               costs the ordinary base -- the adaptive escape is
+    #                               "forage in the cool night, rest by the water at
+    #                               midday", a commute rather than a death tax. An
+    #                               earlier flat multiplier on base+move was a seed-0
+    #                               thirst bomb (+18-21pp, midday culling); see
+    #                               docs/day_night.md §4. Read only when day_length>0.
     night_vision_floor: float = 0.4  # inter-agent vision multiplier at midnight
     #                               (1.0 = no darkening). Night shrinks how far an
     #                               agent can SEE OTHER AGENTS (prey/pred/peer), the
