@@ -10,8 +10,8 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import (WorldState, attack_range_of, escape_of, invest_of,
-                    pos_to_cell, size_of)
+from .state import (WorldState, armor_of, attack_range_of, escape_of, invest_of,
+                    pos_to_cell, size_of, spike_of)
 
 
 class Metrics(NamedTuple):
@@ -86,6 +86,19 @@ class Metrics(NamedTuple):
     # -- a static mean averages the two and would hide a perfect commute. Constant 0
     # when day_length=0. Appended, never inserted (run_headless reads by name).
     phase: jax.Array
+    # Morphological defences (docs/trait_defense_catalog.md,
+    # docs/trait_addition_feasibility.md). Like the red-queen genes, the herbivore-
+    # lineage mean is the functional carrier (prey are the ones defending), and the
+    # carnivore-lineage mean is the control that should stay ~0 if the (1-diet) tax
+    # gate is working. Appended, never inserted (run_headless reads by name).
+    mean_armor: jax.Array       # population mean of the evolved armour gene
+    armor_std: jax.Array        # spread -- collapsed near 0 is the "no defence" signature
+    herb_armor: jax.Array       # herbivore-lineage mean (diet < 0.35): the real armour
+    carn_armor: jax.Array       # carnivore-lineage mean: diet-gate control, expect ~0
+    mean_spike: jax.Array
+    spike_std: jax.Array
+    herb_spike: jax.Array       # herbivore-lineage mean: the real retaliation
+    carn_spike: jax.Array       # diet-gate control, expect ~0
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -144,6 +157,19 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
     herb_escape = jnp.sum(escape * is_herb) / herb_n
     hunt_success = jnp.sum((state.last_meat > 0.0) * is_carn) / carn_n
 
+    # Morphological defences: population mean/spread plus the lineage split, same
+    # is_carn/is_herb masks as the red-queen genes above.
+    armor = armor_of(state.genome, cfg)
+    spike = spike_of(state.genome, cfg)
+    mean_armor = jnp.sum(armor * alive) / denom
+    armor_var = jnp.sum(((armor - mean_armor) ** 2) * alive) / denom
+    mean_spike = jnp.sum(spike * alive) / denom
+    spike_var = jnp.sum(((spike - mean_spike) ** 2) * alive) / denom
+    herb_armor = jnp.sum(armor * is_herb) / herb_n
+    carn_armor = jnp.sum(armor * is_carn) / carn_n
+    herb_spike = jnp.sum(spike * is_herb) / herb_n
+    carn_spike = jnp.sum(spike * is_carn) / carn_n
+
     return Metrics(
         population=pop,
         mean_energy=jnp.sum(state.energy * alive) / denom,
@@ -185,4 +211,12 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         herb_escape=herb_escape,
         hunt_success=hunt_success,
         phase=state.phase,
+        mean_armor=mean_armor,
+        armor_std=jnp.sqrt(armor_var),
+        herb_armor=herb_armor,
+        carn_armor=carn_armor,
+        mean_spike=mean_spike,
+        spike_std=jnp.sqrt(spike_var),
+        herb_spike=herb_spike,
+        carn_spike=carn_spike,
     )

@@ -124,6 +124,32 @@ def escape_of(genome: jax.Array, cfg: Config) -> jax.Array:
                                       0.0, None)
 
 
+def armor_of(genome: jax.Array, cfg: Config) -> jax.Array:
+    """Map the armour gene to [0, armor_span/2]; 0 at gene=0.
+
+    The prey's damage reduction (docs/trait_defense_catalog.md): the fraction of an
+    incoming bite's energy damage negated. One-sided like `escape_of` -- gene 0 is
+    exactly 0 (a fresh population has no armour), and the gene can only ever *buy*
+    defence, paying `armor_cost` in proportion. Read per-prey inside
+    `dynamics.predation` and taxed on the energy ledger in `dynamics.metabolize`
+    (never thirst -- docs/trait_addition_feasibility.md §B.2).
+    """
+    return cfg.armor_span * jnp.clip(jax.nn.sigmoid(genome[:, cfg.armor_index]) - 0.5,
+                                     0.0, None)
+
+
+def spike_of(genome: jax.Array, cfg: Config) -> jax.Array:
+    """Map the spike gene to [0, spike_span/2]; 0 at gene=0.
+
+    The prey's retaliation (docs/trait_defense_catalog.md): energy reflected back onto
+    an attacker in proportion to the damage the attacker's bite deals. One-sided like
+    `escape_of`; gene 0 is exactly 0. Read per-prey inside `dynamics.predation`
+    (reflected onto the biter) and taxed on the energy ledger in `dynamics.metabolize`.
+    """
+    return cfg.spike_span * jnp.clip(jax.nn.sigmoid(genome[:, cfg.spike_index]) - 0.5,
+                                     0.0, None)
+
+
 def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
     k_pos, k_head, k_gen, k_hue, k_plant, k_carn, k_rej = jax.random.split(key, 7)
     n = cfg.n_max

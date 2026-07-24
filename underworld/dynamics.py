@@ -9,7 +9,8 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import WorldState, attack_range_of, escape_of, pos_to_cell
+from .state import (WorldState, armor_of, attack_range_of, escape_of, pos_to_cell,
+                    spike_of)
 
 
 def _herbivory(diet: jax.Array, cfg: Config) -> jax.Array:
@@ -203,6 +204,14 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
 
     dmg = jnp.where(has_target, cfg.pred_rate * state.diet, 0.0) * state.alive
     wanted = jnp.zeros(n + 1).at[target].add(dmg)                  # per-prey demand
+    # Prey armour (docs/trait_defense_catalog.md) negates a fraction of each bite.
+    # Scaling the per-prey *demand* -- not just the damage taken -- keeps predation
+    # conservative: the attacker's payout `scale` falls in step, so meat_gain stays
+    # <= damage (test_predation_energy_not_created). The dump slot (n) keeps full
+    # retention; nothing targets it with dmg>0 anyway.
+    if cfg.armor_heritable:
+        retain = jnp.concatenate([1.0 - armor_of(state.genome, cfg), jnp.ones(1)])
+        wanted = wanted * retain
     prey_e = jnp.concatenate([jnp.maximum(state.energy, 0.0), jnp.zeros(1)])
     removed = jnp.minimum(wanted, prey_e)
     scale = jnp.where(wanted > 0, removed / wanted, 0.0)           # attacker payout frac
@@ -210,6 +219,16 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
     meat_gain = dmg * scale[target] * cfg.pred_efficiency          # [n]
     damage = removed[:n]                                           # [n]
     energy = state.energy - damage + meat_gain
+
+    # Prey spikes (docs/trait_defense_catalog.md) reflect energy back onto the biter
+    # in proportion to the damage its bite actually extracted. A pure sink on the
+    # attacker (not transferred to the prey), so it only ever reduces total energy --
+    # predation still creates none. Zero for non-attackers (dmg=0) and for the dump
+    # slot (spike 0), so no gating mask is needed.
+    if cfg.spike_heritable:
+        spike = jnp.concatenate([spike_of(state.genome, cfg), jnp.zeros(1)])
+        bite_dealt = dmg * scale[target]                          # [n] energy extracted
+        energy = energy - cfg.spike_reflect * spike[target] * bite_dealt
 
     # Same bite events, but drawing against the prey's *water* pool instead.
     water_dmg = dmg * cfg.meat_water_frac
@@ -228,7 +247,8 @@ def predation(state: WorldState, nbr: jax.Array, dist: jax.Array,
 def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
                climb: jax.Array, alive: jax.Array, cfg: Config,
                size: jax.Array, attack_range: jax.Array | None = None,
-               escape: jax.Array | None = None) -> jax.Array:
+               escape: jax.Array | None = None, armor: jax.Array | None = None,
+               spike: jax.Array | None = None) -> jax.Array:
     """Charge the per-step energy cost of existing, moving, climbing, and (for
     carnivores) hunting. The diet-scaled term makes pure carnivory unsustainable
     when prey is scarce -- the feedback that keeps herbivores and carnivores
@@ -260,6 +280,14 @@ def metabolize(energy: jax.Array, thrust: jax.Array, diet: jax.Array,
         tax = tax + cfg.attack_cost * jnp.maximum(attack_range - cfg.attack_range, 0.0) * diet
     if cfg.prey_escape_enabled and escape is not None:
         tax = tax + cfg.escape_cost * escape * (1.0 - diet)
+    # Morphological defences (docs/trait_defense_catalog.md): armour and spikes pay an
+    # energy upkeep scaled by (1-diet), so drifting carnivores (who are rarely prey)
+    # pay ~0. Same energy-ledger discipline as the red-queen taxes above -- never
+    # thirst (docs/trait_addition_feasibility.md §B.2).
+    if cfg.armor_heritable and armor is not None:
+        tax = tax + cfg.armor_cost * armor * (1.0 - diet)
+    if cfg.spike_heritable and spike is not None:
+        tax = tax + cfg.spike_cost * spike * (1.0 - diet)
     return energy - cost - cfg.climb_cost * climb - tax * alive
 
 

@@ -38,6 +38,14 @@ def mutate(genome: jax.Array, key: jax.Array, cfg: Config) -> jax.Array:
     # straight into predation, the tightest coupling in the sim.
     sigma = sigma.at[cfg.attack_index].set(cfg.attack_mutation_sigma)
     sigma = sigma.at[cfg.escape_index].set(cfg.escape_mutation_sigma)
+    # Morphological defences (docs/trait_defense_catalog.md): armour and spikes are
+    # prey-side body traits that feed straight into predation, so they drift at the
+    # same slow trait-gene rate. Like escape they are NOT crossover-exempt below --
+    # they never enter the sensorimotor loop (the brain reads neither), so there is no
+    # controller/body mismatch to guard against, and recombining them keeps the
+    # G-matrix estimator honest.
+    sigma = sigma.at[cfg.armor_index].set(cfg.armor_mutation_sigma)
+    sigma = sigma.at[cfg.spike_index].set(cfg.spike_mutation_sigma)
     return genome + jax.random.normal(key, genome.shape) * sigma
 
 

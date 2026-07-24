@@ -14,8 +14,8 @@ from . import (brain, dynamics, ecology, memory, metrics, reproduction, sensors,
                spatial)
 from . import terrain as terrain_mod
 from .config import Config
-from .state import (WorldState, attack_range_of, diet_of, escape_of, init_state,
-                    pos_to_cell, size_of)
+from .state import (WorldState, armor_of, attack_range_of, diet_of, escape_of,
+                    init_state, pos_to_cell, size_of, spike_of)
 
 
 def build_step(cfg: Config, terrain):
@@ -79,9 +79,13 @@ def build_step(cfg: Config, terrain):
         # thirst); read the two genes per-agent here, same cheap recompute as `size`.
         attack_range = attack_range_of(state.genome, cfg)
         escape = escape_of(state.genome, cfg)
+        # Defence upkeep (armour/spikes) rides the same energy ledger as the red-queen
+        # taxes; read per-agent here, the same cheap recompute as `size`.
+        armor = armor_of(state.genome, cfg)
+        spike = spike_of(state.genome, cfg)
         energy = dynamics.metabolize(
             energy, thrust, state.diet, climb, state.alive, cfg, size,
-            attack_range, escape)
+            attack_range, escape, armor, spike)
         # Day-night heat (docs/day_night.md): midday raises evaporative water loss.
         # Reuses `light` computed above for the nocturnal predation boost (0 at
         # midnight, 1 at midday; None when day_length=0 -> thirst is bit-exact old).

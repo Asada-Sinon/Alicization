@@ -17,8 +17,8 @@ from underworld import Config, new_world
 from underworld import dynamics, memory, reproduction
 from underworld import genome as genome_mod
 from underworld import terrain as terrain_mod
-from underworld.state import (attack_range_of, escape_of, init_state, invest_of,
-                              size_of)
+from underworld.state import (armor_of, attack_range_of, escape_of, init_state,
+                              invest_of, size_of, spike_of)
 
 
 # Small, fast config for tests.
@@ -510,6 +510,128 @@ def test_prey_escape_shrinks_effective_attack_reach():
     st1 = state._replace(genome=state.genome.at[1, cfg.escape_index].set(6.0))
     _, meat1, _, _, _, _ = dynamics.predation(st1, nbr, dist, valid, cfg)
     assert float(meat1[0]) == 0.0
+
+
+def test_defence_genes_neutral_start_and_bounds():
+    """The morphological defences (docs/trait_defense_catalog.md) must start neutral
+    so a fresh population reproduces the pre-gene world: armor_of and spike_of at
+    gene 0 are exactly 0 (no defence is ever seeded, only evolved), and both stay
+    inside [0, span/2] however extreme the gene."""
+    cfg = tiny_cfg()
+    wild = jnp.linspace(-50.0, 50.0, cfg.n_max)
+    for of, idx, span in ((armor_of, cfg.armor_index, cfg.armor_span),
+                          (spike_of, cfg.spike_index, cfg.spike_span)):
+        g = jnp.zeros((cfg.n_max, cfg.genome_size)).at[:, idx].set(wild)
+        v = np.asarray(of(g, cfg))
+        assert v.min() >= -1e-6
+        assert v.max() <= span * 0.5 + 1e-6
+        neutral = float(of(jnp.zeros((1, cfg.genome_size)), cfg)[0])
+        assert neutral == pytest.approx(0.0, abs=1e-6)
+
+
+def test_defence_taxes_hit_energy_not_water():
+    """The armour/spike upkeep MUST ride the energy ledger, never thirst
+    (docs/trait_addition_feasibility.md §B.2): a water-ledger cost would recreate the
+    body-size gene's juvenile-thirst censoring. A high-armour and a high-spike
+    herbivore each lose extra *energy* in metabolize, scaled by (1-diet); neither
+    loses extra water in thirst (which takes neither argument)."""
+    cfg = tiny_cfg()
+    alive = jnp.array([True, True])
+    thrust = jnp.array([0.5, 0.5])
+    climb = jnp.array([0.0, 0.0])
+    size = jnp.array([1.0, 1.0])
+    e0 = jnp.array([10.0, 10.0])
+    diet_h = jnp.array([0.0, 0.0])
+    base = jnp.array([cfg.attack_range, cfg.attack_range])
+    z = jnp.array([0.0, 0.0])
+
+    # Armour tax = armor_cost * armor * (1-diet), on top of the neutral baseline.
+    arm = jnp.array([0.4, 0.4])
+    e_arm = float(dynamics.metabolize(e0, thrust, diet_h, climb, alive, cfg, size,
+                                      base, z, arm, z)[0])
+    e_noarm = float(dynamics.metabolize(e0, thrust, diet_h, climb, alive, cfg, size,
+                                        base, z, z, z)[0])
+    assert e_noarm - e_arm == pytest.approx(cfg.armor_cost * 0.4, rel=1e-4)
+
+    # Spike tax = spike_cost * spike * (1-diet).
+    spk = jnp.array([0.4, 0.4])
+    e_spk = float(dynamics.metabolize(e0, thrust, diet_h, climb, alive, cfg, size,
+                                      base, z, z, spk)[0])
+    assert e_noarm - e_spk == pytest.approx(cfg.spike_cost * 0.4, rel=1e-4)
+
+    # A carnivore (diet 1) pays ~0 for either -- the (1-diet) gate.
+    diet_c = jnp.array([1.0, 1.0])
+    e_carn_arm = float(dynamics.metabolize(e0, thrust, diet_c, climb, alive, cfg, size,
+                                           base, z, arm, spk)[0])
+    e_carn_none = float(dynamics.metabolize(e0, thrust, diet_c, climb, alive, cfg, size,
+                                            base, z, z, z)[0])
+    assert e_carn_none - e_carn_arm == pytest.approx(0.0, abs=1e-6)
+
+    # Thirst is untouched by either defence gene -- it takes neither argument.
+    w = dynamics.thirst(jnp.array([10.0, 10.0]), thrust, alive, cfg, size)
+    assert float(w[0]) == pytest.approx(
+        10.0 - (cfg.base_water_cost + cfg.move_water_cost * 0.5) * (1.0 ** 0.75),
+        rel=1e-4)
+
+
+def test_armor_reduces_bite_and_spike_hurts_attacker():
+    """Armour cuts the energy a prey loses to a bite; spikes reflect energy back onto
+    the biter -- both relative to the same undefended baseline, and predation must
+    still never create energy (docs/trait_defense_catalog.md)."""
+    cfg = tiny_cfg(n_max=2, n_init=2)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+
+    # Agent 0 carnivore, agent 1 herbivore prey at dist 3.0 well inside reach 6.0.
+    from underworld.state import diet_of
+    genome = state.genome.at[:, cfg.attack_index].set(0.0)
+    genome = genome.at[:, cfg.escape_index].set(0.0)
+    genome = genome.at[0, cfg.diet_index].set(6.0)      # carnivore
+    genome = genome.at[1, cfg.diet_index].set(-6.0)     # herbivore
+    state = state._replace(
+        genome=genome, diet=diet_of(genome, cfg),
+        energy=jnp.array([10.0, 10.0]), water=jnp.array([10.0, 10.0]),
+        alive=jnp.array([True, True]))
+    nbr = jnp.array([[1], [0]])
+    dist = jnp.array([[3.0], [3.0]])
+    valid = jnp.array([[True], [True]])
+
+    # Baseline: no defence.
+    g0 = state.genome.at[1, cfg.armor_index].set(0.0).at[1, cfg.spike_index].set(0.0)
+    e0, meat0, dmg0, _, _, _ = dynamics.predation(state._replace(genome=g0),
+                                                  nbr, dist, valid, cfg)
+    assert float(dmg0[1]) > 0.0                          # the prey took a bite
+    assert float(jnp.sum(meat0)) <= float(jnp.sum(dmg0)) + 1e-4  # no energy created
+
+    # Armour: the prey loses strictly less energy to the same bite.
+    g_arm = state.genome.at[1, cfg.armor_index].set(6.0)   # armor ~0.5
+    _, _, dmg_arm, _, _, _ = dynamics.predation(state._replace(genome=g_arm),
+                                                nbr, dist, valid, cfg)
+    assert float(dmg_arm[1]) < float(dmg0[1])
+
+    # Spike: the attacker (agent 0) ends with strictly less energy than undefended.
+    g_spk = state.genome.at[1, cfg.spike_index].set(6.0)   # spike ~0.5
+    e_spk, meat_spk, dmg_spk, _, _, _ = dynamics.predation(state._replace(genome=g_spk),
+                                                           nbr, dist, valid, cfg)
+    assert float(e_spk[0]) < float(e0[0])
+    # Still no free energy for the attacker.
+    assert float(jnp.sum(meat_spk)) <= float(jnp.sum(dmg_spk)) + 1e-4
+
+
+def test_defence_genes_recombine_unlike_size():
+    """Armour and spike feed predation but not the sensorimotor loop, so like escape
+    (and unlike size/diet) they are NOT crossover-exempt -- they recombine freely,
+    keeping the G-matrix estimator honest (docs/trait_defense_catalog.md)."""
+    cfg = tiny_cfg()
+    a = jnp.zeros((cfg.n_max, cfg.genome_size))
+    a = a.at[:, cfg.armor_index].set(-3.0).at[:, cfg.spike_index].set(-3.0)
+    b = jnp.ones((cfg.n_max, cfg.genome_size))
+    b = b.at[:, cfg.armor_index].set(3.0).at[:, cfg.spike_index].set(3.0)
+    mixed = np.asarray(genome_mod.crossover(a, b, jax.random.PRNGKey(0), cfg))
+    # At least some agents must have taken the armour/spike gene from parent B --
+    # i.e. the columns are not frozen to parent A the way size/diet are.
+    assert np.any(mixed[:, cfg.armor_index] == 3.0), "armour must recombine"
+    assert np.any(mixed[:, cfg.spike_index] == 3.0), "spike must recombine"
 
 
 def test_child_water_investment_clamped_to_own_tank():
@@ -1410,13 +1532,13 @@ def test_ecology_regrow_clips_and_recovers():
 
 
 def test_trait_gene_indices_are_distinct_and_in_range():
-    """The five trait genes are appended after the brain block at fixed offsets;
-    a collision (two traits sharing a column) or an out-of-range index would let
-    one gene silently overwrite another with no test firing anywhere. Guards the
-    genome layout the whole trait-evolution programme rests on."""
+    """The trait genes are appended after the brain block at fixed offsets; a
+    collision (two traits sharing a column) or an out-of-range index would let one
+    gene silently overwrite another with no test firing anywhere. Guards the genome
+    layout the whole trait-evolution programme rests on."""
     cfg = Config()
     idxs = [cfg.diet_index, cfg.invest_index, cfg.size_index,
-            cfg.attack_index, cfg.escape_index]
+            cfg.attack_index, cfg.escape_index, cfg.armor_index, cfg.spike_index]
     assert len(set(idxs)) == len(idxs), "trait gene indices collide"
     assert min(idxs) == cfg.brain_params, "traits must start right after the brain block"
     assert max(idxs) < cfg.genome_size, "a trait index falls outside the genome"

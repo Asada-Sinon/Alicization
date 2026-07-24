@@ -51,14 +51,16 @@ class Config:
     retina_sectors: int = 8        # directional vision resolution
     hidden: int = 16               # recurrent hidden units (the fluctlight's memory)
     out_dim: int = 2               # [turn, thrust]
-    trait_dim: int = 5             # non-brain genes; [0] = diet, [1] = investment,
+    trait_dim: int = 7             # non-brain genes; [0] = diet, [1] = investment,
     #                                 [2] = size, [3] = attack_range (predator reach),
-    #                                 [4] = escape (prey evasion). The last two are the
-    #                                 co-evolving pair of the red-queen experiment
-    #                                 (docs/attack_range_redqueen.md): a predator's attack
-    #                                 gene and a prey's escape gene chase each other up.
-    #                                 Both cost energy, never water (docs/trait_roadmap.md
-    #                                 §5) -- see `attack_cost`/`escape_cost` below.
+    #                                 [4] = escape (prey evasion), [5] = armor (bite-damage
+    #                                 reduction), [6] = spike (damage reflected onto the
+    #                                 attacker). [3][4] are the red-queen pair
+    #                                 (docs/attack_range_redqueen.md); [5][6] are the visible
+    #                                 morphological defences (docs/trait_defense_catalog.md,
+    #                                 docs/trait_addition_feasibility.md). Every one costs
+    #                                 energy, never water (docs/trait_roadmap.md §5) -- see
+    #                                 `attack_cost`/`escape_cost`/`armor_cost`/`spike_cost`.
     genome_init_scale: float = 0.4
     food_sample_dist: float = 9.0  # how far ahead each sector samples the plant field
 
@@ -149,6 +151,38 @@ class Config:
     #                                the predator's reach evolves), used to tell a true
     #                                red-queen (both traits climb) from one-sided
     #                                optimisation (reach drifts up until its tax bites).
+
+    # --- visible morphological defences (docs/trait_defense_catalog.md,
+    # docs/trait_addition_feasibility.md): armour reduces a bite's damage, spikes
+    # reflect damage back onto the attacker. Both are prey-side traits -- the tax is
+    # scaled by (1-diet) so drifting carnivores pay ~0, gene=0 maps to *zero* defence
+    # (a fresh population has none, so any defence is evolved, not seeded), and both
+    # ride the ENERGY ledger in `metabolize`, NEVER thirst's water ledger: a water tax
+    # would censor the trait through the juvenile-thirst bottleneck exactly as it
+    # reversed the body-size gene (docs/trait_roadmap.md §5). They are the structural
+    # twins of the escape gene -- same one-sided map, same (1-diet) gate, same slow
+    # mutation, same energy tax. First landing of the defence line; the A/B judgement
+    # and the falsifiable predictions are in docs/trait_addition_feasibility.md §B.
+    armor_span: float = 1.0          # armor_of maps the gene to [0, 0.5]: the fraction
+    #                                  of a bite's energy damage negated. 0 at gene=0.
+    armor_cost: float = 0.012        # energy/step per unit armour, scaled by (1-diet).
+    #                                  Same magnitude as escape_cost; tune with a short
+    #                                  probe before a long run so it neither pegs at the
+    #                                  ceiling nor starves the predators.
+    armor_mutation_sigma: float = 0.02   # slow trait rate, same as size/escape.
+    armor_heritable: bool = True     # False: predation ignores the armour gene and
+    #                                  levies no tax; the gene still exists, drifts and
+    #                                  is reported -- the clean control arm, genome-
+    #                                  compatible with the True arm.
+    spike_span: float = 1.0          # spike_of maps the gene to [0, 0.5]: energy
+    #                                  reflected onto the attacker per unit of damage its
+    #                                  bite deals. 0 at gene=0.
+    spike_reflect: float = 1.0       # multiplier on (bite_damage * spike) reflected back
+    #                                  onto the biter. A pure energy sink on the attacker,
+    #                                  never transferred to the prey.
+    spike_cost: float = 0.012        # energy/step per unit spike, scaled by (1-diet).
+    spike_mutation_sigma: float = 0.02
+    spike_heritable: bool = True     # False: spikes have no effect and no tax (control).
 
     # --- terrain: one elevation field drives mountains, rivers and forest ---
     # h(x,y) = H_local(x) * exp(-d_ridge^2 / 2*sigma^2)          <- the range
@@ -766,6 +800,17 @@ class Config:
     def escape_index(self) -> int:
         """Column holding the prey escape gene, the red-queen counterpart to attack."""
         return self.brain_params + 4
+
+    @property
+    def armor_index(self) -> int:
+        """Column holding the prey armour gene (bite-damage reduction). Appended after
+        escape -- a morphological defence (docs/trait_defense_catalog.md)."""
+        return self.brain_params + 5
+
+    @property
+    def spike_index(self) -> int:
+        """Column holding the prey spike gene (damage reflected onto the attacker)."""
+        return self.brain_params + 6
 
     @property
     def attack_max(self) -> float:
