@@ -21,6 +21,17 @@ def _herbivory(diet: jax.Array, cfg: Config) -> jax.Array:
     return jnp.where(diet > cfg.carn_graze_cutoff, 0.0, (1.0 - diet) ** 6)
 
 
+def _forage_heat_scale(state: WorldState, cfg: Config) -> jax.Array:
+    """Midday-heat foraging penalty for `graze`/`eat_fruit` (docs/day_night.md §6,
+    the water-neutral Phase-2 substrate). Returns a multiplier on intake demand:
+    1 at night, (1 - forage_heat) at midday. `light` is 0 at midnight, 1 at midday.
+    Only ever called inside a `cfg.day_length > 0` branch, so when the clock is off
+    this code is absent from the trace and grazing is bit-exact the pre-clock kernel.
+    """
+    light = 0.5 * (1.0 - jnp.cos(2.0 * jnp.pi * state.phase))
+    return jnp.clip(1.0 - cfg.forage_heat * light, 0.0, None)
+
+
 def act(state: WorldState, outputs: jax.Array, terrain, cfg: Config):
     """Apply brain outputs. Returns (new_state, thrust, climb) where thrust is in
     [0, 1] and `climb` is the elevation *gained* this step (>= 0), which
@@ -84,6 +95,8 @@ def graze(state: WorldState, cfg: Config):
     # predator-prey oscillation.
     herbivory = _herbivory(state.diet, cfg)
     demand = cfg.eat_rate * herbivory * state.alive            # [n_max]
+    if cfg.day_length > 0:
+        demand = demand * _forage_heat_scale(state, cfg)
 
     demand_per_cell = jnp.zeros(cfg.n_cells).at[cell].add(demand)
     removed_per_cell = jnp.minimum(demand_per_cell, state.plant)
@@ -106,6 +119,8 @@ def eat_fruit(state: WorldState, cfg: Config):
     cell = pos_to_cell(state.pos, cfg)
     herbivory = _herbivory(state.diet, cfg)
     demand = cfg.fruit_eat_rate * herbivory * state.alive
+    if cfg.day_length > 0:
+        demand = demand * _forage_heat_scale(state, cfg)
 
     demand_per_cell = jnp.zeros(cfg.n_cells).at[cell].add(demand)
     removed_per_cell = jnp.minimum(demand_per_cell, state.fruit)

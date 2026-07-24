@@ -645,6 +645,17 @@ class Config:
     #                               neighbour table did not gather. Default 0.0 =
     #                               off; read only when day_length>0 (predation gets
     #                               light=None otherwise, a bit-exact no-op).
+    forage_heat: float = 0.0      # midday-heat foraging penalty (water-neutral):
+    #                               grazing/fruit intake `demand` is scaled by
+    #                               (1 - forage_heat*light), so foraging is less
+    #                               productive at midday and best in the cool night.
+    #                               The seed-0 sweep found this the SAFEST lever
+    #                               (thirst ~baseline, tiny population swing) but
+    #                               spatially INERT with the reactive 16-unit brain
+    #                               (docs/day_night.md §4) -- it is the water-neutral
+    #                               SUBSTRATE for the Phase-2 test of whether a larger
+    #                               `hidden` evolves a scheduled commute on it (§6).
+    #                               Default 0.0 = off; read only when day_length>0.
 
     # --- rng ---
     seed: int = 0
