@@ -57,6 +57,19 @@
 | brodie2005 | Parallel arms races between garter snakes and newts...（10.1007/s10886-005-1345-x） | 2005 | 略读 | 双侧协同演化真实范例，补 attack_range_redqueen 背景 | notes/papers/brodie2005.md | `docs/trait_defense_catalog.md` 军备竞赛节（交叉引用 `docs/attack_range_redqueen.md`） |
 | hague2018 | Large-effect mutations generate trade-off between predatory and locomotor ability...（10.1002/evl3.76） | 2018 | 略读 | 军备升级的运动代价实测，支持给对抗性状挂税 | notes/papers/hague2018.md | `docs/trait_defense_catalog.md` 军备竞赛节 |
 | kastner2024 | Gape-limited invasive predator frequently kills avian prey too large to swallow（10.1002/ece3.11598） | 2024 | 待读 | size refuge 机制佐证（非综述、强度弱） | 未写 | `docs/trait_defense_catalog.md` 体型/速度节（标 gap） |
+| estes2011trophic | Trophic Downgrading of Planet Earth（10.1126/science.1205106） | 2011 | 略读 | 顶级捕食者丧失致级联，支持"apex 不是稳定化稳妥选择" | notes/papers/estes2011trophic.md | `docs/multispecies_ecology.md` §1 |
+| ripple2012trophic | Trophic cascades in Yellowstone: 15 years after wolf reintroduction（10.1016/j.biocon.2011.11.005，DOI 后缀未独立确认） | 2012 | 待读 | 狼-麋鹿-植被三级级联实例 | 未写 | `docs/multispecies_ecology.md` §1 |
+| prugh2009rise | The Rise of the Mesopredator（10.1525/bio.2009.59.9.9） | 2009 | 略读 | mesopredator release，三级结构靠顶端压制 | 未写 | `docs/multispecies_ecology.md` §1 |
+| mccann1997reevaluating | Re-evaluating the omnivory-stability relationship in food webs（10.1098/rspb.1997.0172） | 1997 | 略读 | 弱杂食稳定食物网，"第三物种选杂食者"的理论依据 | notes/papers/mccann1997reevaluating.md | `docs/multispecies_ecology.md` §2 |
+| lenski2003evolutionary | The evolutionary origin of complex features（10.1038/nature01568） | 2003 | 略读 | Avida 复杂功能演化，ALife 先例背景 | 未写 | `docs/multispecies_ecology.md` §3 |
+| zaman2014coevolution | Coevolution Drives the Emergence of Complex Traits and Promotes Evolvability（10.1371/journal.pbio.1002023） | 2014 | 略读 | 寄主-寄生协同演化提升复杂度/可演化性 | notes/papers/zaman2014coevolution.md | `docs/multispecies_ecology.md` §3 |
+| ray1991approach | An Approach to the Synthesis of Life（Tierra，Artificial Life II，无 DOI） | 1991 | 略读 | 寄生体/超寄生体自发涌现，填 biology.md §7.12 空白 | notes/papers/ray1991approach.md | `docs/multispecies_ecology.md` §3 |
+| yaeger1994computational | PolyWorld: Life in a New Context（Artificial Life III，无 DOI） | 1994 | 待读 | 神经 agent 涌现物种竞争/拟态/捕食 | 未写 | `docs/multispecies_ecology.md` §3 |
+| bshary2006interspecific | Interspecific Communicative and Coordinated Hunting between Groupers and Giant Moray Eels（10.1371/journal.pbio.0040431） | 2006 | 待读 | 真·跨种协作捕食范例 | 未写 | `docs/multispecies_ecology.md` §4 |
+| spottiswoode2016reciprocal | Reciprocal signaling in honeyguide-human mutualism（10.1126/science.aaf4885） | 2016 | 略读 | 跨种互利+双向信号，导引率 33→66% 实验 | notes/papers/spottiswoode2016reciprocal.md | `docs/multispecies_ecology.md` §4 |
+| bshary2006image | Image scoring and cooperation in a cleaner fish mutualism（10.1038/nature04755） | 2006 | 待读 | 清洁共生+间接互惠，最可迁移互利机制之一 | 未写 | `docs/multispecies_ecology.md` §4 |
+| sridhar2009why | Why do birds participate in mixed-species foraging flocks? A large-scale synthesis（10.1016/j.anbehav.2009.05.008） | 2009 | 待读 | 混种群 follower/leader，报警互利搭现有 retina | 未写 | `docs/multispecies_ecology.md` §4 |
+| bronstein1994our | Our Current Understanding of Mutualism（10.1086/418432） | 1994 | 待读 | 互利 90% 是植物-动物，本沙盒无植物 agent 故不可直接迁移 | 未写 | `docs/multispecies_ecology.md` §4 |
 
 ## 检索记录
 
