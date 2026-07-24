@@ -103,7 +103,16 @@ def build_step(cfg: Config, terrain):
 
         # 5. death -> 6. birth
         state, deaths = reproduction.cull(state, water_damage, cfg)
-        state = reproduction.reproduce(state, key, cfg)
+        # Local crowd (agents per plant cell) for density-dependent reproduction
+        # (docs/herbivore_overpopulation.md L6). Post-cull, pre-birth: parents' own
+        # crowd throttles their breeding. Cheap scatter-count, no new state field.
+        # Default penalty 0 -> None -> the branch in reproduce compiles away.
+        if cfg.density_repro_penalty > 0.0:
+            crowd = jnp.zeros(cfg.n_cells).at[pos_to_cell(state.pos, cfg)].add(
+                state.alive.astype(jnp.float32))
+        else:
+            crowd = None
+        state = reproduction.reproduce(state, key, cfg, crowd)
 
         # 7a. passive trampling: a niche-construction feedback with zero genome
         # cost (docs/TODO.md priority 3, Stage 0). Reuses the same per-cell

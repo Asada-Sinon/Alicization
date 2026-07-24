@@ -288,6 +288,33 @@ def test_alive_energy_consistency():
     assert bool(jnp.all(state.energy[dead] <= cfg.repro_threshold))
 
 
+def test_density_dependent_reproduction_suppresses_crowded_births():
+    """With density_repro_penalty>0 a crowded cell raises the energy bar to breed, so
+    the same breeders produce fewer offspring than with the penalty off
+    (docs/herbivore_overpopulation.md L6). Default penalty 0 is a pure-energy gate."""
+    from underworld.state import pos_to_cell
+    cfg_off = tiny_cfg(n_max=64, n_init=16)                          # penalty 0
+    cfg_on = tiny_cfg(n_max=64, n_init=16, density_repro_penalty=2.0,
+                      density_repro_cap=4.0)
+    terrain = terrain_mod.build(cfg_off)
+    state = init_state(cfg_off, jax.random.PRNGKey(0), terrain)
+    # 16 breeders, energy just above the base threshold, all packed into one cell.
+    alive = jnp.arange(cfg_off.n_max) < 16
+    energy = jnp.where(alive, cfg_off.repro_threshold + 4.0, 0.5)
+    pos = jnp.where(alive[:, None], jnp.zeros((cfg_off.n_max, 2)), state.pos)
+    state = state._replace(alive=alive, energy=energy, pos=pos)
+    crowd = jnp.zeros(cfg_off.n_cells).at[pos_to_cell(state.pos, cfg_off)].add(
+        state.alive.astype(jnp.float32))                            # ~16 in the packed cell
+
+    key = jax.random.PRNGKey(1)
+    born_off = int(jnp.sum(reproduction.reproduce(state, key, cfg_off).alive) - 16)
+    born_on = int(jnp.sum(
+        reproduction.reproduce(state, key, cfg_on, crowd).alive) - 16)
+    assert born_off > 0, "the off arm should breed (energy is above threshold)"
+    # crowd 16, cap 4 -> crowding clips to 1 -> eff_threshold = 16*(1+2*1) = 48 > energy 20
+    assert born_on == 0, "a saturated cell must suppress births under the penalty"
+
+
 def test_investment_gene_controls_the_handover():
     """The energy a child receives must follow its parent's gene, not a constant.
 

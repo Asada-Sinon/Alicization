@@ -17,7 +17,7 @@ import jax.numpy as jnp
 
 from .config import Config
 from .genome import crossover, mutate
-from .state import WorldState, invest_of, size_of
+from .state import WorldState, invest_of, pos_to_cell, size_of
 
 
 class Deaths(NamedTuple):
@@ -119,9 +119,21 @@ def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config,
     return partner_by_rank[rank_of]
 
 
-def reproduce(state: WorldState, key: jax.Array, cfg: Config) -> WorldState:
+def reproduce(state: WorldState, key: jax.Array, cfg: Config,
+              crowd: jax.Array | None = None) -> WorldState:
     alive = state.alive
-    want = alive & (state.energy > cfg.repro_threshold)
+    # Density-dependent reproduction (docs/herbivore_overpopulation.md L6): a crowded
+    # cell raises the energy bar to breed, so dense patches self-limit. `crowd` is the
+    # per-cell agent count from step.py. Default off (penalty 0) compiles this away,
+    # leaving `want` bit-exact the old pure-energy gate. Herbivores form the dense
+    # crowds, so this throttles them far more than the sparse carnivores -- targeting
+    # the density problem without touching water/plant carrying capacity.
+    threshold = cfg.repro_threshold
+    if cfg.density_repro_penalty > 0.0 and crowd is not None:
+        crowding = jnp.clip(crowd[pos_to_cell(state.pos, cfg)] / cfg.density_repro_cap,
+                            0.0, 1.0)
+        threshold = cfg.repro_threshold * (1.0 + cfg.density_repro_penalty * crowding)
+    want = alive & (state.energy > threshold)
     free = ~alive
 
     n_birth = jnp.minimum(jnp.sum(want), jnp.sum(free))

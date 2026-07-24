@@ -313,6 +313,17 @@ class Config:
     # --- life cycle ---
     energy_init: float = 8.0
     repro_threshold: float = 16.0  # reproduce above this energy
+    # Density-dependent reproduction (docs/herbivore_overpopulation.md L6): crowding
+    # raises the effective energy an agent needs to breed, so dense cells self-limit --
+    # a logistic negative feedback the world lacked (reproduction was a pure energy
+    # gate, no density term). Because herbivores form the dense crowds and carnivores
+    # are sparse, this throttles herbivores far more than carnivores WITHOUT touching
+    # the water/plant carrying capacity (the levers docs/scale_and_density.md §5.3
+    # falsified). Default 0.0 = OFF = a compile-time no-op branch, bit-exact old world.
+    density_repro_penalty: float = 0.0  # eff_threshold = repro_threshold * (1 + penalty
+    #                                     * min(crowd/cap, 1)); 0 disables it entirely.
+    density_repro_cap: float = 6.0      # agents in one plant cell at which the penalty
+    #                                     saturates (world/grid = 4-unit cells).
     # Per-offspring investment is a *gene*, not a constant -- see `invest_of`.
     # These bound it; the range is Polyworld's, which evolved bodies in a
     # comparable 2D world for years without it degenerating to an extreme.
