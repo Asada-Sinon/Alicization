@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Address me in Chinese.** Every question, clarification, or choice you put to me —
+including in plan mode and through the AskUserQuestion tool — is written in Chinese,
+even when this file and your own working notes are in English. This governs what *I*
+read, not how you reason internally.
+
 ## What this is
 
 **Underworld** — a GPU-native 2D artificial-life sandbox inspired by the artificial
