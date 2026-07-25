@@ -28,6 +28,33 @@
 
 ---
 
+## Session 2026-07-25（白天，用户在场：三通路落地 + 6 种子判决）
+
+- 承接夜间 PENDING（用户 #4 多性状 / #5 种间合作），用户拍板**三个方向全做**、分 worktree agent 并行实现。
+- 完成（三方向已并入 main 三独立提交、已 push）:
+  - **实现**：`cbce9fc` forage_pref（草↔果权衡，trait_dim 7→8）、`1964949` 腐食接 food retina（不动 in_dim）、
+    `c25ba60` 共享报警场 alarm（独立场、折进 pred）。三者均默认关（forage 付 golden 重 bless、A/C bit-exact）。
+    整合冲突手工解（doc 章节 §7→§8→§9 重排、metrics/tests keep-both）。check.py/contracts/pytest 全绿。
+  - **6 种子判决**（36 runs、6 并发、20000 步，各派 result-analyst）——**三者全维持默认关**：
+    - **腐食 v2 = 弱阳性**：carn_frac ON>OFF 4/6、p=0.156（未达 6/6 硬标准）；**min 首次抬高 0.098→0.127
+      （抗灭绝成立，胜首版 min 反降）**；carrion_total 198≈首版 204（主动觅食**没**加速消费）；pop −80 弱负。
+      → 不够默认开。`feasibility.md §7 第二版结果`。
+    - **alarm = NULL**：death_predation_frac 4/6、p=0.56、CI 跨 0；机制点火（alarm_total>0）但**信息冗余**
+      （§8.4 第 1 类）。`feasibility.md §8.6`。
+    - **forage = 证否**：forage_pref_std **OFF>ON**（反向 5/6，方差塌缩 32.6%），种群整体倒向草；**根因果层
+      仅草层 0.07%、无生态位可专精**。`feasibility.md §9.5`。dip-test 不必做（必要条件已否）。
+- PENDING（下个 session 第一件事）: **方向待用户定盘**。三通路都收口、默认关。候选（研究已备、判决已给出下一步）：
+  ①救腐食 v2——补 seed 6–17 到 ≥12 配对把 p 推过线（差值与 SD 同量级，§5 功效算术需 ~20+ 种子），或加消费
+  流量计（累计 `scavenge_gain`）诊断"主动觅食是否真生效"；②救 forage——先**加厚果层**（动 `fruit` 生态位）+
+  交叉 ridge 地形，否则权衡永远单向塌缩；③救 alarm——加「高 alarm cell 猎物密度」读出 + `los_occlusion` 造
+  超视距信息。**不要自己挑一个开跑**，都要 6 种子。
+- 坑:
+  - **worktree agent 无独立 `.venv`**：用主 checkout 的 `.venv/bin/python`、以 worktree 为 cwd 跑（`sys.path` 的
+    `.` 指向 worktree 码），全程带 `XLA_PYTHON_CLIENT_PREALLOCATE=false`。
+  - **6 并发 sweep ~27min**（36 run×~4.5min/6 并发）——不是卡住。诊断 CPU 回落坑三连：`nvidia-smi` 看 util/NVML、
+    `ps` 看 CPU 时间是否暴涨、log 看 steps/s。本轮 GPU util 100%、驱动 580.173 一致，正常。
+  - forage 是**唯一付永久 trait_dim 代价却被证否**的改动，选择留档（回退 8→7 会再 churn golden+作废种群）。
+
 ## Session 2026-07-25（夜间自主，用户睡前授权）
 
 - 授权: 用户睡前给自主授权（见 `memory/overnight-autonomous-mandate.md`），一切调研+实验落报告、
@@ -94,38 +121,3 @@
   - `scripts/probe_diel.py` 已入库（相位分箱探针，通用）；Phase 2 探针 `phase2_probe.py` 在
     scratchpad、未入库（一次性）。
 
-## Session 2026-07-23
-
-- 完成: 三次 commit，一条线（种群密度校验 → 密度杠杆证伪 → 恐惧地景落地），全部已 push
-  （`main...origin/main` 无 ahead/behind）。
-  - `8c57c33` 定标世界比例尺 + 校验种群密度，落 `docs/scale_and_density.md`（纯文档）：
-    1 世界单位≈1 m、全图≈0.26 km²；食草密度≈现实天花板 66×、食肉≈现实极值 3800×；
-    补上 `carnivore_riparian.md:286` 留的 [推断,未测] 空档。
-  - `bf9e836` 两轮单种子探针证伪「扩世界降密度」，写进 §5.3（纯文档）：三个世界尺寸、多种
-    河数下食草密度一律钉在 ~7600–8400 头/km²——**密度是尺度不变量**，选项 B 出局；砍
-    `plant_max` 也不动密度却饿死捕食者，选项 C 走这条路出局。只剩 A（承认压缩）或 C′（深
-    度重调水经济，高风险），D（修比例）独立低风险。
-  - `eca17e5` 落地恐惧地景设计二并**默认开启**：`WorldState` 新增 `fear:[n_cells]`（仿
-    `trample` 散射沉积 + 衰减），`sensors.sense` 把前方采样的 fear 与瞬时 `pred_val` 取 max
-    折进 `pred` 通道；`in_dim`/`genome_size` 不变，不作废种群。6 配对种子（seed0–5，15k 步）：
-    `carn_speed` 1.5→2.4（6/6，p=0.031，最硬信号）、`carn_frac` 12.1%→10.2%（5/6）、
-    `death_thirst_age` +4.9（未恶化幼体渴死）；但 `carn_water_dist` 只 +1.4（弱，噪声大）——
-    恐惧场能让捕食者动起来、少一点，给不了「搬离河岸」（缺昼夜通勤）。full check + pytest 过。
-- PENDING: **先修 `docs/TODO.md` 的「队列」一节——它已经过期，而它是下一个会话的权威入口。**
-  两处具体的过期（对照 `git log` 可核）：
-  1. §「当前主线」仍写「下一步是托管任务的第三步：开子 agent 找优化点、清理 AI 写的冗余
-     代码」，但这一步已在 `27c01cc`/`33d5baf`/`6f5ec55` 做完，三份审计文档（`test_coverage_audit`
-     /`cleanup_audit`/`optimization_audit`）已经在同文件的文档地图里。
-  2. §「主线 A —— 捕食者离水」仍把恐惧地景写成未做的「正路 / 头号方案」，但 `eca17e5` 已
-     落地且默认开启，实测结论已在 `landscape_of_fear.md` §6。
-  改完再定下一个方向——**方向本身待用户定盘**，候选与依据见 `.context/current-focus.md`，
-  不要自己挑一个就开跑（这两条候选都会动世界行为或 golden 带）。
-- 坑:
-  - **`fear_rate` 是编译期分支**：设 0 时沉积与折叠从 jit trace 消失、逐位复现旧基线。做
-    消融/对照一律 `scripts/run_headless.py --set fear_rate=0`，不要改 `config.py`。
-  - **golden 已按恐惧场默认开启重新 bless**（200 步 smoke 里 population 1520→1549 等微动）。
-    拿旧 `scripts/golden.json` 或旧分支的数字对比会误报「配置被改坏了」。
-  - 仓库根目录躺着未跟踪的 `oa1.json`（199 KB，OpenAlex `/works` 查询的原始 JSON 响应，
-    query = "Desiccation resistance water balance Circellium bacchus"，7月21 文献检索的残留）。
-    grep 全仓无任何代码/文档引用它。建议直接删或挪进 scratchpad。**没有加进 `.gitignore`**：
-    CLAUDE.md 的规矩是 scratch 根本不该进仓库，为一个一次性文件名加 ignore 只会把它永久藏起来。
