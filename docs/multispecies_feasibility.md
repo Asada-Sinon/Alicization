@@ -159,6 +159,52 @@ diet 差/相似构造），要分辨第三物种要么复用 diet 派生交互�
 **真·腐食者物种**（trait_dim+1，与 diet 正交的专食腐位）。可视化上腐食者聚到死亡点是天然的"新物种"
 观感（`server/protocol.py` 可加一路 carrion 场着色，仿昼夜/水层）。
 
+### 第二版：接 retina 主动觅食（2026-07-25，run_id 待定：`20260725-carrion-v2`）
+
+第一版的诊断（§7 上文 line 149）是"效应弱因食肉者**踩到才吃、不主动找**、碰上概率低、补贴稀薄"。
+第二版直接修这一点——让食肉者能**沿 food 通道朝尸体转向**。
+
+- **[对应] 关键差异 = 接 retina 主动觅食，且未付 `in_dim` 代价。** 首版曾担心"接 retina 就要动
+  `in_dim`、作废全脑"（line 153/157），实测**不必**：`sensors.sense` 的 food 通道本就把 plant 和
+  fruit 融在同一路（`edible = plant + fruit_energy*fruit`，再 `/plant_max`），fruit 就是"以边际食用
+  价值加权折进 food、不占第六通道"的先例。第二版照抄这条纪律——在 `if cfg.carrion_enabled:` 内把
+  `carrion_visible_scale * carrion_energy * diet * carrion[cells]` 加进 `edible`：**carnivore（diet≈1）
+  看得见尸体、herbivore（diet≈0）看不见**（diet 加权），于是食肉者能朝前方尸体转向。**不加 retina
+  通道、`in_dim` 恒 67、genome_size 恒 1385、不作废演化种群**——比首版设想的"作废全脑"便宜得多。
+- **[对应] 安全性同首版**：融合 gate 在**现有** `carrion_enabled`（默认 False）后——关时 food 采样只有
+  plant+fruit、逐位复现旧世界、**golden 不动、无需重 bless**。测试
+  `test_carrion_food_channel_off_is_bit_exact`（关时 carrion 对 food 通道 bit-exact 无影响）+
+  `test_carrion_food_channel_draws_carnivore_not_herbivore`（开时食肉者 food 读数升、食草者≈不变）。
+  新增旋钮 `carrion_visible_scale`（默认 1.0，只在开启时活）控制 carrion 在 food 通道里的可见权重。
+
+**演化验证判据（先写后跑，run_id `20260725-carrion-v2`，本会话只写设计、不跑 6 种子）**：
+- **假设**：让食肉者**主动找尸体**后，carrion 补贴不再稀薄——食肉者碰上尸体的概率从"随机撞上"升到
+  "定向觅食"，于是 §4 的第二食源真正兑现，`carnivore_frac` ON>OFF 比首版**更硬**：
+  期望从首版的 **4/6 同向、p=0.31** 抬到 **6/6 同向、配对 Wilcoxon p≤0.031（n=6 地板）**，且
+  **最低种子 min 抬高**（首版 0.091→0.084 不升反降，本版期望 min 上移＝真正的抗灭绝缓冲）。
+- **成功判据**（照 §7 首版格式）：6 配对种子 ON(`carrion_enabled=True`，含 retina 融合) vs
+  OFF（`carrion_enabled=False`）——① `carnivore_frac` ON>OFF，**6/6 同向**、配对 Wilcoxon **p≤0.031**；
+  ② `carn_frac` 各种子 **min 抬高**（抗灭绝硬指标）；③ 护栏：`population`/`death_thirst_frac` 不显著
+  恶化；④ 机制在开火：`carrion_total` ON>0，且**较首版更快被消耗**（主动觅食→尸体不该像首版那样积压到
+  204，应更低＝被更高效吃掉）。
+- **失败/负结果预案**（照首版）：
+  - 若仍 4/6、p 不过地板 → 判定"主动找也救不了"：说明瓶颈不在觅食效率而在**尸体供给量**（死亡率×
+    `carrion_per_death` 太低），下一步该调 `carrion_per_death`/`carrion_energy` 或换第二版失败即
+    转 §7(b) 独立 scavenge trait，而非再堆 retina。
+  - 若 carn_frac 6/6 升但 `population` 显著跌或 `death_thirst_frac` 恶化 → "白送第二粮仓致食肉爆炸、
+    压垮食草基座"，回退默认关。
+  - 若 `carrion_total` 不降反升 → 融合权重 `carrion_visible_scale` 太低、食肉者其实没看见，先扫这个旋钮
+    再下结论。
+- **对比首版的意义**：第一版证明了"机制安全、但被动觅食补贴太稀薄"；第二版是**同一机制的觅食升级**，
+  隔离变量恰好是"主动 vs 被动"（首版=对照）。若第二版 6/6 过而首版 4/6 不过，则**"接 retina 主动觅食"
+  正是首版弱阳性的成因**，且这一升级**零 `in_dim` 代价**——是本条腐食通路能否默认开启的关键一跳。
+- **[本世界实测] 早期点火证据（单种子 seed 0 ×4000 步，非结论，仅证"主动找"在动）**：v2-ON
+  `carrion_total=224`、`carnivore_frac=0.052`，对比首版记录的单种子 ON `carrion_total=256`、
+  `carn_frac=0.072`（§7 line 118）。**carrion_total 224<256 = 尸体积压更少、被消费更快**，方向与
+  "主动觅食→尸体不再堆积"一致（弱证据）；而 `carn_frac` 单种子 0.052<0.072 落在噪声内——CLAUDE.md
+  明言捕食者存活近阈值、run-to-run 方差超过多数参数效应，**单种子的 carn_frac 差异毫无判决力**，
+  必须 6 种子。此处只证机制在动、方向不反，判决留给上面的 6 种子设计。
+
 ---
 
 ## 9. 资源分割第二食草者（forage_pref，草↔果权衡基因，2026-07-25，run_id 待定）

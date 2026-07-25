@@ -174,6 +174,19 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     # channel also leaves `in_dim` -- and therefore every evolved genome --
     # untouched by this layer.
     edible = state.plant[cells] + cfg.fruit_energy * state.fruit[cells]
+    # Carrion rides the same food channel so a carnivore can turn TOWARD a corpse
+    # ahead exactly as a grazer turns toward grass -- the first carrion cut only let
+    # a scavenger eat what it already stood on (docs/multispecies_feasibility.md §7,
+    # second cut). Diet-weighted, so a herbivore (diet~0) sees ~0 carrion and a
+    # meat-eater sees it at full strength; folding it in here rather than as a sixth
+    # retina channel leaves `in_dim` -- and every evolved genome -- untouched, the
+    # same discipline as fruit above. `carrion_enabled` is a Python bool baked into
+    # the jit (Config is closed over, not traced), so when off this block is absent
+    # from the trace -- not merely zeroed -- and the food channel is bit-exact the
+    # pre-carrion kernel, same convention as the fear/los folds.
+    if cfg.carrion_enabled:
+        edible = edible + (cfg.carrion_visible_scale * cfg.carrion_energy
+                           * state.diet[:, None] * state.carrion[cells])
     food = edible / cfg.plant_max                              # [n, R]
 
     wd = terrain.water_dist[cells]                             # [n, R]

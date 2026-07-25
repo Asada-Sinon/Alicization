@@ -317,6 +317,66 @@ def test_carrion_off_by_default_stays_zero():
     assert float(jnp.sum(state.carrion)) == 0.0, "carrion must stay 0 when disabled"
 
 
+def test_carrion_food_channel_off_is_bit_exact():
+    """The carrion->food-channel fold lives inside `if cfg.carrion_enabled:`, so with
+    the flag off (default) a corpse in the field is bit-invisible to `sensors.sense` --
+    the food channel is byte-identical whether carrion is 0 or saturated. Same
+    convention as the los-occlusion off test (docs/multispecies_feasibility.md §7)."""
+    from underworld import spatial, sensors
+    cfg = tiny_cfg(carrion_enabled=False)
+    assert cfg.carrion_enabled is False
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+    table = spatial.build_table(state, cfg)
+    nbr = spatial.gather_neighbors(state, table, cfg)
+    delta, dist, valid = spatial.geometry(state, nbr, cfg)
+    inp_zero = sensors.sense(state._replace(carrion=jnp.zeros(cfg.n_cells)),
+                             nbr, delta, dist, valid, terrain, cfg)
+    inp_full = sensors.sense(state._replace(carrion=jnp.full(cfg.n_cells, 9.0)),
+                             nbr, delta, dist, valid, terrain, cfg)
+    r = cfg.retina_sectors
+    assert bool(jnp.array_equal(inp_zero[:, :r], inp_full[:, :r])), \
+        "carrion must not touch the food channel when carrion_enabled is off"
+
+
+def test_carrion_food_channel_draws_carnivore_not_herbivore():
+    """With carrion_enabled True, a corpse lifts the FOOD retina channel for a carnivore
+    (diet~1) but leaves a herbivore's (diet~0) essentially unchanged -- the fold is
+    diet-weighted, so meat-eaters actively turn TOWARD corpses along the same channel
+    grass uses while grazers ignore them, and `in_dim` is unpaid (the food channel is
+    still the first R entries). docs/multispecies_feasibility.md §7, second cut."""
+    from underworld import spatial, sensors
+    from underworld.state import diet_of
+    cfg = tiny_cfg(n_max=8, n_init=2, world_size=128.0, grid=32, sense_grid=3,
+                   vision_radius=40.0, forest_occlusion=0.0, carrion_enabled=True)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+    # Agent 0 carnivore (diet->1), agent 1 herbivore (diet->0), same spot & heading so
+    # they sample the identical cells; only the diet weight differs.
+    genome = state.genome.at[0, cfg.diet_index].set(6.0).at[1, cfg.diet_index].set(-6.0)
+    pos = state.pos.at[0].set(jnp.array([40.0, 64.0])).at[1].set(jnp.array([40.0, 64.0]))
+    heading = state.heading.at[0].set(0.0).at[1].set(0.0)
+    state = state._replace(genome=genome, diet=diet_of(genome, cfg), pos=pos,
+                           heading=heading)
+    table = spatial.build_table(state, cfg)
+    nbr = spatial.gather_neighbors(state, table, cfg)
+    delta, dist, valid = spatial.geometry(state, nbr, cfg)
+    # Uniform carrion so every sector's sample cell holds a corpse.
+    inp_c = sensors.sense(state._replace(carrion=jnp.full(cfg.n_cells, 5.0)),
+                          nbr, delta, dist, valid, terrain, cfg)
+    inp_0 = sensors.sense(state._replace(carrion=jnp.zeros(cfg.n_cells)),
+                          nbr, delta, dist, valid, terrain, cfg)
+    r = cfg.retina_sectors
+    carn_c, carn_0 = np.asarray(inp_c[0, :r]), np.asarray(inp_0[0, :r])
+    herb_c, herb_0 = np.asarray(inp_c[1, :r]), np.asarray(inp_0[1, :r])
+    # Carnivore: the corpse lifts every sector's food reading.
+    assert float(np.min(carn_c - carn_0)) > 0.5, "carnivore must see the corpse as food"
+    # Herbivore: diet-weighted ~0, essentially blind to it.
+    assert float(np.max(np.abs(herb_c - herb_0))) < 0.05, "herbivore must not see carrion"
+    # And where the corpse is, the carnivore's food reading dwarfs the herbivore's.
+    assert float(np.max(carn_c - herb_c)) > 0.5
+
+
 def test_density_dependent_reproduction_suppresses_crowded_births():
     """With density_repro_penalty>0 a crowded cell raises the energy bar to breed, so
     the same breeders produce fewer offspring than with the penalty off

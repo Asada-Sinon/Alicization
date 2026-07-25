@@ -559,9 +559,10 @@ class Config:
     # besides live prey. Default OFF (carrion_enabled=False) -> nothing is deposited,
     # nothing is eaten, the field stays identically 0, and the world is bit-exact the
     # pre-carrion kernel (no genome change, so golden is untouched). Turn on with
-    # --set carrion_enabled=True. First cut: carnivores scavenge what they stand on
-    # (no retina channel for it yet, so no in_dim change) -- they stumble onto corpses
-    # rather than seeking them; folding carrion into the food retina is a later step.
+    # --set carrion_enabled=True. Carnivores scavenge what they stand on (dynamics.
+    # scavenge) AND see carrion ahead folded into the FOOD retina channel, diet-weighted
+    # (sensors.sense, carrion_visible_scale) -- so they actively turn toward corpses
+    # rather than only stumbling onto them, all without an in_dim/genome change.
     carrion_enabled: bool = False
     carrion_per_death: float = 3.0    # carrion deposited per death, scaled by body size
     #                                   (a bigger corpse feeds more). Real carrion is
@@ -571,6 +572,15 @@ class Config:
     carrion_eat_rate: float = 1.0     # how fast a scavenger drains a cell's carrion.
     carrion_energy: float = 1.4       # energy per unit carrion eaten (trophic loss vs
     #                                   live prey: a corpse is worth less than a kill).
+    carrion_visible_scale: float = 1.0  # how strongly carrion shows up in the FOOD retina
+    #                                   channel for a carnivore (sensors.sense). First cut
+    #                                   had scavengers stumble onto corpses; folding carrion
+    #                                   into the food channel -- diet-weighted, so herbivores
+    #                                   see ~0 -- lets a carnivore turn TOWARD a corpse ahead
+    #                                   along the same channel grass uses, WITHOUT a new
+    #                                   retina channel (in_dim/genome unchanged). Only read
+    #                                   inside `if cfg.carrion_enabled:`, so with carrion off
+    #                                   this is dead and the food channel is bit-exact old.
 
     # --- long-term spatial memory (see memory.py) ---
     memory_water_slots: int = 2       # one slot is fragile: a single stale entry

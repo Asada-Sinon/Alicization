@@ -97,6 +97,10 @@ ON 0.023 < OFF 0.044，2/6，p=0.44，贴旧漂变；根因是 venom 毒发时�
    当前 ~10–12% 往现实 <1% 压，走 `carnivore_riparian.md` 的 `carn_cost` / 能量转换路线。
 2. **补「河岸带停留时长 / 到访频率」指标** —— `landscape_of_fear.md` §6 后续第一条。当前只有
    `carn_water_dist` 静态均值，分不清「缩短停留」和「完全不去」。成本低、纯观测、不动世界行为。
+3. **腐食通路第二版 6 种子验证** —— carrion 已折进 food retina 让食肉者**主动找尸体**（`sensors.sense`、
+   diet 加权、**零 `in_dim` 代价、默认关 bit-exact、golden 不动**）。设计与判据已写进
+   `multispecies_feasibility.md` §7"第二版：接 retina 主动觅食"（run_id `20260725-carrion-v2`），
+   **待跑 6 配对种子 ON vs OFF**（`--set carrion_enabled=True`）。首版 4/6 弱阳性，本版期望 6/6 且抬 min。
 
 ### 已实现、已验证、结论已归档
 
