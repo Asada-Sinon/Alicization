@@ -718,6 +718,55 @@ class Config:
     #                               not just the spatial metrics; at 3.0 it held.
     #                               Only read when fear_rate>0.
 
+    # --- shared alarm field (docs/multispecies_feasibility.md §8, user #5's
+    # minimal-reciprocity scaffold, the Quinn pattern). A SECOND [n_cells] field
+    # `alarm` in WorldState -- deliberately SEPARATE from `fear` so the two never
+    # conflate: `fear` records where a PREDATOR STOOD (deposited by carnivores),
+    # `alarm` records where a PREY SAW a predator (deposited by prey that sense a
+    # threat). sensors.sense folds it into the same `pred` retina channel via max,
+    # exactly like fear, so a nearby agent -- of any diet, con- or heterospecific --
+    # reads "someone else spotted a predator that way" as learnable spatial danger.
+    # The DEPOSIT is a hardcoded affordance (automatic information-sharing); the
+    # RESPONSE stays with the already-evolved brain (it already uses the pred
+    # channel to decide whether to flee), so no cooperative BEHAVIOUR is scripted
+    # -- only the channel to coordinate over exists. This is the scaffold §5's
+    # three priors (peer NULL, extra-brain falsified, social learning unproven)
+    # said pure-emergent cross-species mutualism needs: a coordination payoff that
+    # does not exist today (peer's plain added visibility already measured NULL).
+    # Zero in_dim/genome change (the fold reuses the pred channel), so an evolved
+    # population still loads. DEFAULT OFF (alarm_rate=0.0): the deposit and the
+    # sensor fold are BOTH compile-time branches on alarm_rate>0 (Config is closed
+    # over by build_step, not traced), so at 0 the whole mechanism is absent from
+    # the jit trace, `alarm` stays identically zero, the world is bit-exact the
+    # pre-alarm kernel, and golden holds without a re-bless. Turn on with
+    # --set alarm_rate=0.05. Same convention as fear_rate/carrion_enabled.
+    alarm_rate: float = 0.0       # deposit per alarming prey occupying a cell, per
+    #                               step, before decay. Default 0 => OFF. 0.05
+    #                               mirrors the fear working point: a single
+    #                               continuously-alarming cell asymptotes to
+    #                               alarm_rate/(1-alarm_decay) = 0.05/0.01 = 5,
+    #                               clipped to the field cap 1.0, so a spot where
+    #                               prey keep spotting predators saturates as
+    #                               maximally alarming.
+    alarm_decay: float = 0.99     # per-step decay of the alarm trace. Half-life
+    #                               ~69 steps, same timescale as fear_decay: a
+    #                               fresh alarm fades over tens of steps, long
+    #                               enough for neighbours to react, short enough
+    #                               that a cleared area stops reading dangerous.
+    alarm_sense_scale: float = 3.0 # how strongly the sampled alarm reads into the
+    #                               pred channel before the max-fold, mirroring
+    #                               fear_sense_scale (3.0 was fear's validated
+    #                               working point; 1.0 was too weak to clear seed
+    #                               noise there). Only read when alarm_rate>0.
+    alarm_pred_threshold: float = 0.05  # a prey (diet<0.5) deposits alarm only when
+    #                               its raw predator-presence signal (max over
+    #                               neighbours of closeness*(diet_j-diet_i), the
+    #                               same construction as sensors' pred_val, taken
+    #                               BEFORE any fear/alarm fold so alarm cannot feed
+    #                               itself) exceeds this. 0.05 keeps out numerical
+    #                               dust while firing on any real threat nearby.
+    #                               Only read when alarm_rate>0.
+
     # --- day-night (diel) cycle (docs/day_night.md; the next step on the
     # landscape-of-fear line). docs/landscape_of_fear.md §6 named the missing
     # ingredient: the fear field made carnivores ROAM (carn_speed 1.5->2.4, 6/6,

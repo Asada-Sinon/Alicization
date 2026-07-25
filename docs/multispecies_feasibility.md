@@ -207,6 +207,90 @@ diet 差/相似构造），要分辨第三物种要么复用 diet 派生交互�
 
 ---
 
+## 8. 共享报警场（alarm，2026-07-25，落地未跑，run_id: 20260725-alarm）
+
+按 §5 的判决落地了**用户 #5「种间合作」的最小互惠脚手架**（Quinn 模式）。这不是一个新物种，也不是一条
+新能量通路，而是一个**当前不存在的协调收益**：把「某个个体看见了捕食者」变成邻居（含异种）可学习的
+空间危险信号，**沉积是硬编码 affordance、响应留给已演化的脑**。
+
+### 8.1 为什么是「报警」而不是别的合作
+
+**[本世界实测/对应] 三条同向先验指向「纯涌现跨种互利不现实作为首个结果」**（§5 与 `multispecies_
+ecology.md` §5）：peer 通道近乎无效（3×6×20k，`mean_size` 0.725 vs 0.737）、加脑容量在静态地形下二阶
+适应测不出、社会学习本身从未在本世界被证实。故正路是**脚手架**：制造一个协调收益的 affordance，把
+「用不用」留给脑。**光加可见性（peer）已证 NULL**，所以脚手架必须提供 peer 之外的东西——**别人的
+观察结果**（公共信息），这正是混种鸟群/哨兵系统的可迁移核心（`multispecies_ecology.md` §4）。
+
+### 8.2 机制 [对应]
+
+- **新场**：`WorldState.alarm:[n_cells]`（fear/trample/carrion 同款 per-cell 原语；`reproduction.place`
+  无需改——它对 rank-any 场通用）。**刻意独立于 `fear`，不复用**：`fear` 记录「**捕食者站过哪**」（由
+  食肉者沉积），`alarm` 记录「**猎物在哪看见了捕食者**」（由受惊猎物沉积）。两者语义不同，混用会把
+  「威胁在此」和「有人示警」搅在一起。
+- **沉积（`step.py` 7a''' 块，`alarm_rate>0` 编译期分支）**：猎物（`diet<0.5` 且 `alive`）在**感知到
+  附近天敌**时，往其所在 cell 沉积 `alarm_rate`，逐步 `alarm_decay` 腐化、clip 到 [0,1]（沉积-下步读取
+  范式，完全仿 fear）。「感知到天敌」= 用 post-movement 邻居表（`nbr2/dist2/valid2`，与 predation 同一
+  张表）**原始重建** `pred_seen = max_j closeness*(diet_j-diet_i)`——与 sensors 的 `pred_val` 同构，但
+  **取自任何 fear/alarm 折叠之前**，故 alarm 不会自我喂食成 runaway；超过 `alarm_pred_threshold` 才沉积。
+- **读取（`sensors.sense` pred-fold，`alarm_rate>0` 编译期分支）**：把采样 cell 的 `alarm` 乘
+  `alarm_sense_scale`，**max 折进现有 pred 通道**——与 fear 折叠**同一行下方**。于是「别人往那边看见了
+  捕食者」成为任何 diet（含异种、含不同 diet 猎物）都能读到的危险信号，**不加 retina 通道、不动
+  `in_dim`/genome**，演化种群照常加载。
+- **默认关 & bit-exact [对应]**：`alarm_rate=0.0`（默认）→ 沉积块与折叠**同为编译期分支**、整段从 jit
+  trace 消失、`alarm` 场恒 0 → **逐位复现旧世界、golden 不动、无需重 bless**（同 fear_rate=0 /
+  carrion_enabled=False 的纪律）。开启：`--set alarm_rate=0.05`（配套 `alarm_decay=0.99`、
+  `alarm_sense_scale=3.0`、`alarm_pred_threshold=0.05`，均照 fear 同名参数取值）。
+- **测试**（`tests/test_kernel.py`）：①默认关 alarm 恒 0，且两组不同 alarm_decay/scale/threshold 但
+  rate=0 的运行**逐位相同**（`array_equal` 于 alive/pop/pos/energy，证 off-branch 真从 trace 消失）；
+  ②开启时猎物沉积（场非零、capped ≤1、`alarm_total` 指标 >0），且无新沉积时纯 `alarm_decay` 衰减；
+  ③开启时 alarm 确实 max 进 pred 通道（同 diet 邻居使 raw pred=0，故 pred 通道激活只能来自 alarm 折叠）。
+
+### 8.3 点火验证 [本世界实测]（单种子 4000 步，非结论）
+
+`run_headless.py 4000 --set alarm_rate=0.05 --json`：`alarm_total` 累到 **1570**（机制在开火、沉积-
+衰减达稳态），`carrion_total` 仍 0（互不干扰），世界没崩（pop 1980、carn_frac 3.7%）。check.py 默认 tier
+golden 10 指标全过（默认关 bit-exact）；68 项 pytest（含 3 项新 alarm 测）全过。**这只证明机制在运转，
+不证明它有生态效应。**
+
+### 8.4 演化验证判据（先写后跑，run_id 20260725-alarm；6 种子由主控跑，此处只写设计）
+
+- **假设 H1（主）**：共享报警场给猎物一个**当前不存在的协调收益**——「用别人的眼睛提前避开捕食者」。
+  若脑能学会对 alarm 折进来的 pred 信号做出逃避响应，则**猎物被捕食死亡率下降**、猎物存活改善。
+- **假设 H2（响应被选择）**：alarm 折叠只在 `alarm_rate>0` 时给 pred 通道额外信号；若它有用，则对该
+  信号敏感的脑权重应被选择出来——**行为层面**表现为猎物在高 alarm cell 的停留/密度下降（避开示警区）。
+- **成功判据**：6 配对种子 ON(`alarm_rate=0.05`) vs OFF(`alarm_rate=0.0`) ×20000 步：
+  - 主判据：`death_predation_frac` ON < OFF，**6/6 同向、配对 Wilcoxon p≤0.031**（n=6 统计地板，
+    `docs/conventions.md` §5）；或等价地 herbivore 谱系存活/占比 ON>OFF 同强度。
+  - 护栏：`population`、`death_thirst_frac`/`death_thirst_age`（示警区常与河边重叠，别恶化幼年渴死
+    瓶颈——同 fear 的风险，`landscape_of_fear.md` §3.2）、`carnivore_frac`（别把食肉者饿到近灭绝阈下）
+    均不显著恶化。
+  - 逐种子报告，不只均值；报所有算过的 p，不做 Bonferroni。
+- **失败/负结果预案（诚实预期：大概率 NULL）**：三条先验指向 NULL，以下任一即判 NULL 并如实记录，**不
+  放宽判据、不重跑找显著**：
+  1. **信息冗余**：猎物本已能直接看见近处捕食者（pred 通道原始项），alarm 只是把「已经看得见的东西」
+     换个来源再说一遍——若 alarm 的空间/时间外延不比原始视觉多给信息，`death_predation_frac` 不动。
+     这是最可能的 NULL 机制（与 carrion「碰不到才吃」弱效应同类：脚手架在，但**边际信息为零**）。
+  2. **响应未被选择**：静态地形 + Ne~2000 下二阶行为适应可能测不出（同加脑证伪的排程问题）——
+     `death_predation_frac` 不动且高 alarm cell 猎物密度无下降。
+  3. **反被捕食者利用**：alarm 折进的是所有 diet 都读的 pred 通道；若食肉者也读它去**回避**猎物聚集
+     的空区（而非猎物避险），可能零和甚至负向。需在分析时分 diet 看响应方向。
+  4. **护栏破**：若 `death_thirst` 恶化（猎物为避 alarm 弃河）或 `carnivore_frac` 崩，即使主判据动了
+     也不算净正。
+- **判 NULL 后的价值**：即便 NULL，本落地仍是**安全的、默认关的、bit-exact 的**互惠脚手架原语，和
+  carrion 一样为「脚手架式种间合作」这条线留下可复现的阴性结果，阻止同一想法被重试。**当前默认保持
+  关闭**，除非 6 种子兑现主判据。
+
+### 8.5 [提案，非结论] 若为正 / 若加强
+
+- 若主判据兑现：可视化加一路 alarm 场着色（仿 fear/水层），看猎物是否真在示警区外绕行。
+- 若 NULL 且诊断为「信息冗余」：alarm 的独特价值只在**超视距/跨地形**才成立——需配合 LOS 遮挡
+  （`los_occlusion_enabled`）让直接视觉被山挡住、而 alarm 经邻居接力翻过山，才可能制造出视觉给不了的
+  信息（**先写后跑的下一轮假设**，非本轮结论）。
+- 若要做成真·哨兵互利：需一个付出成本的示警者（如示警拖慢自己/更显眼），当前版本示警零成本，故不含
+  「利他代价 vs 群体收益」的张力——那是另一个更贵的设计（动 trait 或 act），非本轮范围。
+
+---
+
 ## 9. 资源分割第二食草者（forage_pref，草↔果权衡基因，2026-07-25，run_id 待定）
 
 按 §4 次选（§2(c3)）落地了**草↔果取食权衡基因**——不是新物种，也不是新营养级，而是给现有食草者

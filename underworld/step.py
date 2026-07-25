@@ -167,6 +167,34 @@ def build_step(cfg: Config, terrain):
             fear = jnp.clip(state.fear * cfg.fear_decay + carn_occ * cfg.fear_rate,
                             0.0, 1.0)
 
+        # 7a'''. shared alarm field (docs/multispecies_feasibility.md §8): the
+        # minimal-reciprocity scaffold for user #5's cross-species cooperation.
+        # Distinct from `fear` above -- fear marks where a PREDATOR STOOD; alarm
+        # marks where a PREY SAW one. A prey (diet<0.5) that senses a threat this
+        # step imprints `alarm_rate` on its cell; sensors.sense folds the field
+        # into the pred channel next step, so neighbours of any diet read it as
+        # danger. The DEPOSIT is an affordance (automatic); whether to flee stays
+        # with the evolved brain -- no cooperative behaviour is hardcoded. The
+        # predator-presence signal is rebuilt raw here from the post-movement
+        # neighbour table (nbr2/dist2/valid2, the same one predation uses),
+        # closeness*(diet_j-diet_i) exactly as sensors' pred_val -- taken BEFORE
+        # any fear/alarm fold so alarm can never feed itself into a runaway. Same
+        # per-cell scatter-add + deposit-then-read-next-step idiom as fear.
+        # `alarm_rate > 0.0` is a compile-time branch: when off the whole block is
+        # absent from the trace and `state.alarm` is identically zero, a bit-exact
+        # no-op -- same convention as fear_rate/trample_impact.
+        alarm = state.alarm
+        if cfg.alarm_rate > 0.0:
+            safe2 = jnp.clip(nbr2, 0, cfg.n_max - 1)
+            diet_j2 = state.diet[safe2]                                # [n, M]
+            di2 = state.diet[:, None]                                  # [n, 1]
+            close2 = jnp.clip(1.0 - dist2 / cfg.vision_radius, 0.0, 1.0) * valid2
+            pred_seen = jnp.max(close2 * jnp.maximum(diet_j2 - di2, 0.0), axis=1)  # [n]
+            alarming = (((state.diet < 0.5) & state.alive)
+                        & (pred_seen > cfg.alarm_pred_threshold)).astype(jnp.float32)
+            alarm_occ = jnp.zeros(cfg.n_cells).at[cell].add(alarming * cfg.alarm_rate)
+            alarm = jnp.clip(state.alarm * cfg.alarm_decay + alarm_occ, 0.0, 1.0)
+
         # 7a''. advance the day-night clock (docs/day_night.md) by one step's
         # fraction of a full cycle, wrapped into [0, 1). Written here at step end
         # and read at the *next* step's start (sensors.sense darkening, thirst
@@ -181,6 +209,7 @@ def build_step(cfg: Config, terrain):
         state = state._replace(
             trample=trample,
             fear=fear,
+            alarm=alarm,
             phase=phase,
             plant=ecology.regrow(state.plant, effective_capacity, cfg.regrow_rate,
                                  cfg.regrow_baseline, cfg.plant_max),

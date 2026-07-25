@@ -72,6 +72,21 @@ class WorldState(NamedTuple):
     #                                              read-next-step idiom as fear/trample.
     #                                              Default off (carrion_enabled=False):
     #                                              stays identically zero, a no-op.
+    alarm: jax.Array       # f32    [n_cells]    shared alarm field: where PREY have
+    #                                              SEEN a predator, deposited by prey
+    #                                              that sense a threat and folded into
+    #                                              the pred retina channel so neighbours
+    #                                              (of any diet) read "someone spotted a
+    #                                              predator that way" (docs/multispecies_
+    #                                              feasibility.md §8). Deliberately
+    #                                              SEPARATE from `fear` (which marks
+    #                                              where a predator STOOD): the minimal
+    #                                              reciprocity scaffold, deposit = an
+    #                                              affordance, response left to the brain.
+    #                                              Same per-cell shape + deposit-then-
+    #                                              read-next-step idiom as fear/trample.
+    #                                              Default off (alarm_rate=0.0): stays
+    #                                              identically zero, a no-op.
     phase: jax.Array       # f32    scalar (0-d)  day-night clock in [0, 1): 0/1 = midnight,
     #                                              0.5 = midday (docs/day_night.md). Advanced
     #                                              by 1/day_length each step, wrapped mod 1;
@@ -265,6 +280,8 @@ def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
         fear=jnp.zeros(cfg.n_cells),
         # No one has died anywhere yet.
         carrion=jnp.zeros(cfg.n_cells),
+        # No prey has raised an alarm anywhere yet.
+        alarm=jnp.zeros(cfg.n_cells),
         # The clock starts at midnight (phase 0). Stays here forever when
         # day_length=0, so the diel folds are bit-exact no-ops.
         phase=jnp.zeros(()),

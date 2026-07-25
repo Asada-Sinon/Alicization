@@ -168,6 +168,18 @@ def sense(state: WorldState, nbr: jax.Array, delta: jax.Array, dist: jax.Array,
     if cfg.fear_rate > 0.0:
         pred = jnp.maximum(pred, state.fear[cells] * cfg.fear_sense_scale)
 
+    # Shared alarm field (docs/multispecies_feasibility.md §8): the same pred-channel
+    # fold as fear one line up, but reading the SEPARATE `alarm` field -- where PREY
+    # have SEEN a predator (deposited in step.py's alarm block) rather than where a
+    # predator stood. Folding it in by max lets an agent of any diet read "another
+    # prey spotted a threat that way" without a new retina channel (in_dim untouched).
+    # This is the affordance half of user #5's minimal-reciprocity scaffold; the
+    # response is left to the evolved brain. `alarm_rate > 0.0` is a compile-time
+    # branch: when off the fold is absent from the trace and `state.alarm` is
+    # identically zero anyway, so it is a bit-exact no-op -- same convention as fear.
+    if cfg.alarm_rate > 0.0:
+        pred = jnp.maximum(pred, state.alarm[cells] * cfg.alarm_sense_scale)
+
     # Fruit rides the existing food channel weighted by what it is actually
     # worth to eat, rather than claiming a sixth retina channel. Both are food;
     # what an agent needs to see is edible energy ahead. Keeping them in one

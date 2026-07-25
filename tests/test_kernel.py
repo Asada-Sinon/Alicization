@@ -50,8 +50,10 @@ def test_shapes():
     assert s.fruit.shape == (cfg.n_cells,)
     assert s.memory.shape == (cfg.n_max, cfg.memory_slots, 3)
     assert s.trample.shape == (cfg.n_cells,)
+    assert s.alarm.shape == (cfg.n_cells,)
     assert int(jnp.sum(s.alive)) == cfg.n_init
     assert float(jnp.max(jnp.abs(s.trample))) == 0.0  # no one has walked yet
+    assert float(jnp.max(jnp.abs(s.alarm))) == 0.0    # no prey has alarmed yet
 
 
 def test_no_nans_and_invariants():
@@ -375,6 +377,93 @@ def test_carrion_food_channel_draws_carnivore_not_herbivore():
     assert float(np.max(np.abs(herb_c - herb_0))) < 0.05, "herbivore must not see carrion"
     # And where the corpse is, the carnivore's food reading dwarfs the herbivore's.
     assert float(np.max(carn_c - herb_c)) > 0.5
+def test_alarm_off_by_default_stays_zero():
+    """`alarm_rate` defaults to 0.0 (docs/multispecies_feasibility.md §8): both the
+    step.py deposit block and the sensors.sense pred-fold are compile-time branches
+    on alarm_rate>0, so when off the whole mechanism is absent from the jit trace,
+    the `alarm` field stays identically 0, and the world is bit-exact the pre-alarm
+    kernel. Two configs with wildly different alarm_decay/sense_scale/threshold but
+    rate 0 must therefore produce the *same* world down to the exact values (not
+    merely close), proving the mechanism is truly inert -- same discipline as
+    test_carrion_off_by_default_stays_zero and test_trample_default_is_truly_off.
+    """
+    cfg_a = tiny_cfg()
+    cfg_b = tiny_cfg(alarm_decay=0.5, alarm_sense_scale=9.0, alarm_pred_threshold=0.9)
+    assert cfg_a.alarm_rate == 0.0 and cfg_b.alarm_rate == 0.0
+
+    state_a, ms_a = run(cfg_a, 200)
+    state_b, ms_b = run(cfg_b, 200)
+
+    assert float(jnp.sum(state_a.alarm)) == 0.0, "alarm must stay 0 when disabled"
+    assert float(jnp.sum(state_b.alarm)) == 0.0
+    # Off-branch is absent from the trace, so the two runs are bit-identical.
+    assert bool(jnp.array_equal(state_a.alive, state_b.alive))
+    assert bool(jnp.array_equal(ms_a.population, ms_b.population))
+    assert bool(jnp.array_equal(state_a.pos, state_b.pos))
+    assert bool(jnp.array_equal(state_a.energy, state_b.energy))
+
+
+def test_alarm_prey_deposit_and_decay():
+    """With alarm on (docs/multispecies_feasibility.md §8): prey that sense a
+    predator imprint the shared alarm field (it goes non-zero, capped at 1.0);
+    with no fresh deposit it decays by alarm_decay per step -- the same deposit-
+    then-decay idiom as fear/trample."""
+    from underworld.state import diet_of
+
+    cfg = tiny_cfg(alarm_rate=0.05)
+    state, ms = run(cfg, 400)
+    assert float(jnp.sum(state.alarm)) > 0.0, "prey must deposit alarm when on"
+    assert float(jnp.max(state.alarm)) <= 1.0 + 1e-6, "alarm field is capped at 1"
+    assert float(ms.alarm_total[-1]) > 0.0                     # surfaced as a metric
+
+    # Decay in isolation: start from a known standing alarm field with NO prey
+    # able to raise a fresh alarm (make the whole population carnivore, so the
+    # diet<0.5 gate is False everywhere), step once, and the field must be exactly
+    # the old field times alarm_decay -- proving the decay half of the update.
+    s, k, step_fn, _scan, _terrain = new_world(cfg)
+    known = jnp.full((cfg.n_cells,), 0.5)
+    genome = s.genome.at[:, cfg.diet_index].set(6.0)            # everyone carnivore
+    s = s._replace(alarm=known, genome=genome, diet=diet_of(genome, cfg))
+    s2, _m = step_fn(s, k)
+    assert bool(jnp.allclose(s2.alarm, known * cfg.alarm_decay, atol=1e-5)), \
+        "with no fresh deposit the alarm field must be pure decay"
+
+
+def test_alarm_folds_into_pred_channel():
+    """The shared alarm field reads into the existing pred retina channel by max
+    (docs/multispecies_feasibility.md §8), so an agent of any diet perceives
+    "another prey spotted a threat that way" without a new channel. Checked
+    directly against sensors.sense output (same technique as the LOS/peer tests):
+    with every neighbour at the same diet the raw pred signal is 0, so any pred-
+    channel activation must come from the alarm fold alone."""
+    from underworld import spatial, sensors
+
+    cfg = tiny_cfg(n_max=8, n_init=2, world_size=128.0, grid=32, sense_grid=3,
+                   vision_radius=40.0, forest_occlusion=0.0,
+                   alarm_rate=0.05, alarm_sense_scale=3.0)
+    key = jax.random.PRNGKey(0)
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, key, terrain)
+    # Same diet everywhere -> raw pred_val is 0, isolating the alarm fold.
+    state = state._replace(diet=jnp.full((cfg.n_max,), 0.5))
+
+    r = cfg.retina_sectors
+    pred_off = 2 * r                                            # [food(R), prey(R), pred(R), ...]
+
+    table = spatial.build_table(state, cfg)
+    nbr = spatial.gather_neighbors(state, table, cfg)
+    delta, dist, valid = spatial.geometry(state, nbr, cfg)
+
+    # No alarm anywhere and no live predator -> pred channel is silent.
+    state0 = state._replace(alarm=jnp.zeros(cfg.n_cells))
+    li0 = np.asarray(sensors.sense(state0, nbr, delta, dist, valid, terrain, cfg)[0])
+    assert float(np.max(li0[pred_off:pred_off + r])) < 1e-6
+
+    # A standing alarm field -> whatever cell each sector samples reads as danger.
+    state1 = state._replace(alarm=jnp.full((cfg.n_cells,), 0.2))
+    li1 = np.asarray(sensors.sense(state1, nbr, delta, dist, valid, terrain, cfg)[0])
+    assert float(np.max(li1[pred_off:pred_off + r])) > 0.1, \
+        "alarm must fold into the pred channel (0.2 * 3.0 = 0.6)"
 
 
 def test_density_dependent_reproduction_suppresses_crowded_births():

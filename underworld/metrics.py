@@ -113,6 +113,8 @@ class Metrics(NamedTuple):
     mean_forage_pref: jax.Array  # population mean of the grass<->fruit dial (0.5 = unbiased)
     forage_pref_std: jax.Array   # spread -- ON>OFF is the partitioning signal (§9)
     herb_forage_pref: jax.Array  # herbivore-lineage mean, the real foragers
+    alarm_total: jax.Array      # standing shared-alarm mass (docs/multispecies_
+    #                             feasibility.md §8); 0 when alarm_rate is off
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -246,4 +248,5 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         mean_forage_pref=mean_forage_pref,
         forage_pref_std=jnp.sqrt(forage_pref_var),
         herb_forage_pref=herb_forage_pref,
+        alarm_total=jnp.sum(state.alarm),
     )
