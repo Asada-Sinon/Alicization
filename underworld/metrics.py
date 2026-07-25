@@ -10,8 +10,8 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import (WorldState, armor_of, attack_range_of, escape_of, invest_of,
-                    pos_to_cell, size_of, spike_of)
+from .state import (WorldState, armor_of, attack_range_of, escape_of, forage_pref_of,
+                    invest_of, pos_to_cell, size_of, spike_of)
 
 
 class Metrics(NamedTuple):
@@ -103,6 +103,16 @@ class Metrics(NamedTuple):
     #                             shows the herbivore->carnivore retaliation firing
     carrion_total: jax.Array    # standing corpse mass (docs/multispecies_feasibility.md
     #                             §4); 0 when carrion_enabled is off
+    # Resource partitioning (docs/multispecies_feasibility.md §9). The forage_pref gene
+    # trades grass efficiency against fruit; the whole falsifiable prediction is its
+    # DISTRIBUTION -- character displacement shows up as a rising SPREAD (a std/variance
+    # that grows, hinting at bimodality) among the herbivores who actually forage, not
+    # in the mean (which can sit at 0.5 while the population splits around it). herb_
+    # forage_pref is the functional-carrier lineage mean (diet < 0.35), like herb_escape/
+    # herb_armor. Appended, never inserted (run_headless reads by name).
+    mean_forage_pref: jax.Array  # population mean of the grass<->fruit dial (0.5 = unbiased)
+    forage_pref_std: jax.Array   # spread -- ON>OFF is the partitioning signal (§9)
+    herb_forage_pref: jax.Array  # herbivore-lineage mean, the real foragers
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
@@ -174,6 +184,14 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
     herb_spike = jnp.sum(spike * is_herb) / herb_n
     carn_spike = jnp.sum(spike * is_carn) / carn_n
 
+    # Resource partitioning: mean/spread of the forage_pref dial plus the herbivore-
+    # lineage carrier, same is_herb mask as herb_escape/herb_armor. The spread is the
+    # partitioning signal (docs/multispecies_feasibility.md §9).
+    forage_pref = forage_pref_of(state.genome, cfg)
+    mean_forage_pref = jnp.sum(forage_pref * alive) / denom
+    forage_pref_var = jnp.sum(((forage_pref - mean_forage_pref) ** 2) * alive) / denom
+    herb_forage_pref = jnp.sum(forage_pref * is_herb) / herb_n
+
     return Metrics(
         population=pop,
         mean_energy=jnp.sum(state.energy * alive) / denom,
@@ -225,4 +243,7 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         carn_spike=carn_spike,
         mean_venom=jnp.sum(state.venom * alive) / denom,
         carrion_total=jnp.sum(state.carrion),
+        mean_forage_pref=mean_forage_pref,
+        forage_pref_std=jnp.sqrt(forage_pref_var),
+        herb_forage_pref=herb_forage_pref,
     )

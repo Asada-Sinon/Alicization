@@ -46,6 +46,12 @@ def mutate(genome: jax.Array, key: jax.Array, cfg: Config) -> jax.Array:
     # G-matrix estimator honest.
     sigma = sigma.at[cfg.armor_index].set(cfg.armor_mutation_sigma)
     sigma = sigma.at[cfg.spike_index].set(cfg.spike_mutation_sigma)
+    # Foraging preference (docs/multispecies_feasibility.md §9): a grass<->fruit dial,
+    # a prey-side body trait that feeds grazing, so it drifts at the same slow trait
+    # rate. Like escape/armor it is NOT crossover-exempt below -- it never enters the
+    # sensorimotor loop (the brain reads neither field's own efficiency), so recombining
+    # it keeps the G-matrix estimator honest.
+    sigma = sigma.at[cfg.forage_pref_index].set(cfg.forage_pref_mutation_sigma)
     return genome + jax.random.normal(key, genome.shape) * sigma
 
 

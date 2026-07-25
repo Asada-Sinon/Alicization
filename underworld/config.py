@@ -51,16 +51,23 @@ class Config:
     retina_sectors: int = 8        # directional vision resolution
     hidden: int = 16               # recurrent hidden units (the fluctlight's memory)
     out_dim: int = 2               # [turn, thrust]
-    trait_dim: int = 7             # non-brain genes; [0] = diet, [1] = investment,
+    trait_dim: int = 8             # non-brain genes; [0] = diet, [1] = investment,
     #                                 [2] = size, [3] = attack_range (predator reach),
     #                                 [4] = escape (prey evasion), [5] = armor (bite-damage
     #                                 reduction), [6] = spike (damage reflected onto the
-    #                                 attacker). [3][4] are the red-queen pair
-    #                                 (docs/attack_range_redqueen.md); [5][6] are the visible
-    #                                 morphological defences (docs/trait_defense_catalog.md,
-    #                                 docs/trait_addition_feasibility.md). Every one costs
-    #                                 energy, never water (docs/trait_roadmap.md §5) -- see
-    #                                 `attack_cost`/`escape_cost`/`armor_cost`/`spike_cost`.
+    #                                 attacker), [7] = forage_pref (grass<->fruit foraging
+    #                                 tradeoff -- resource partitioning between the two herb
+    #                                 layers, docs/multispecies_feasibility.md §9). [3][4] are
+    #                                 the red-queen pair (docs/attack_range_redqueen.md); [5][6]
+    #                                 are the visible morphological defences
+    #                                 (docs/trait_defense_catalog.md,
+    #                                 docs/trait_addition_feasibility.md). Every DEFENCE/attack
+    #                                 gene costs energy, never water (docs/trait_roadmap.md §5)
+    #                                 -- see `attack_cost`/`escape_cost`/`armor_cost`/
+    #                                 `spike_cost`. [7] forage_pref is different: NOT a costed
+    #                                 investment but a zero-sum DIAL that trades grass
+    #                                 efficiency against fruit efficiency (no ledger tax --
+    #                                 the tradeoff itself is the cost), see `forage_tradeoff`.
     genome_init_scale: float = 0.4
     food_sample_dist: float = 9.0  # how far ahead each sector samples the plant field
 
@@ -199,6 +206,46 @@ class Config:
     venom_decay: float = 0.9         # per-step multiplicative decay (~7-step half-life).
     venom_slow: float = 0.6          # fraction of speed removed at venom>=1 (clipped).
     venom_drain: float = 0.15        # energy/step drained at venom>=1 (clipped).
+
+    # --- resource partitioning: a grass<->fruit foraging tradeoff gene
+    # (docs/multispecies_feasibility.md §2(c3)/§9). The world already holds two herb
+    # layers -- the `plant` (grass) field and the patchy, high-value `fruit` field --
+    # but both are eaten through the SAME `_herbivory(diet)` taper, so every grazer is
+    # equally (in)competent at each. `forage_pref` (a trait gene, `forage_pref_of` in
+    # state.py) tilts an individual toward one layer at the expense of the other: high
+    # pref -> better at grass, worse at fruit; low pref -> the reverse. If the gene
+    # evolves a BIMODAL distribution, that is character displacement -- two herbivore
+    # niches splitting the two resources (§9). Unlike the defence/red-queen genes this
+    # levies NO energy tax: the tradeoff is the cost. A grass specialist is simply bad
+    # at fruit, so there is no free total-efficiency to run away in (the two per-layer
+    # multipliers always sum to 2), which is what keeps it falsifiable rather than a
+    # pure gain that would peg at an extreme. gene=0 -> pref=0.5 -> UNBIASED: both
+    # multipliers are exactly 1, so a fresh population forages both layers as before
+    # and any partitioning is evolved, not seeded (the clean baseline, like escape=0).
+    forage_tradeoff: float = 0.0     # STRENGTH of the tradeoff, and its master switch.
+    #                                  At 0.0 (default) the forage_pref gene has ZERO
+    #                                  effect on grazing -- both grass and fruit
+    #                                  multipliers are identically 1 whatever the gene,
+    #                                  so grazing is behaviourally the pre-gene kernel
+    #                                  (same convention as armor_heritable=off /
+    #                                  fear_rate=0: a compile-time-gated no-op). The gene
+    #                                  still exists, drifts and is reported, so the arm
+    #                                  is genome-compatible with the on arm. At t>0 the
+    #                                  grass efficiency is scaled by (1 + t*(2*pref-1))
+    #                                  and fruit by (1 - t*(2*pref-1)), sum == 2. Enable
+    #                                  the tradeoff with --set forage_tradeoff=0.5 (0.5
+    #                                  gives a per-layer swing of +/-50% at the extremes,
+    #                                  never zeroing either layer, so a specialist can
+    #                                  still fall back on its weak layer if its strong one
+    #                                  is stripped). Clipped >= 0 in dynamics so a
+    #                                  multiplier never goes negative even at t>1.
+    forage_pref_mutation_sigma: float = 0.02  # slow trait-gene rate, same as size/escape/
+    #                                  armor -- a body dial the brain cannot track is
+    #                                  worse changing fast than slow. NOT crossover-exempt
+    #                                  (genome.py): forage_pref never enters the
+    #                                  sensorimotor loop (the brain reads neither field's
+    #                                  own efficiency), so like escape/armor recombining
+    #                                  it keeps the G-matrix estimator honest.
 
     # --- terrain: one elevation field drives mountains, rivers and forest ---
     # h(x,y) = H_local(x) * exp(-d_ridge^2 / 2*sigma^2)          <- the range
@@ -857,6 +904,14 @@ class Config:
     def spike_index(self) -> int:
         """Column holding the prey spike gene (damage reflected onto the attacker)."""
         return self.brain_params + 6
+
+    @property
+    def forage_pref_index(self) -> int:
+        """Column holding the grass<->fruit foraging-preference gene (resource
+        partitioning, docs/multispecies_feasibility.md §9). Appended after spike --
+        adding it leaves every brain weight and prior trait at the same offset, growing
+        `genome_size` by one."""
+        return self.brain_params + 7
 
     @property
     def attack_max(self) -> float:

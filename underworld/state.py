@@ -168,6 +168,23 @@ def spike_of(genome: jax.Array, cfg: Config) -> jax.Array:
                                      0.0, None)
 
 
+def forage_pref_of(genome: jax.Array, cfg: Config) -> jax.Array:
+    """Map the foraging-preference gene to [0, 1]; 0.5 at gene=0 (no bias -- a fresh
+    population forages grass and fruit equally).
+
+    Resource partitioning between the two herb layers (docs/multispecies_feasibility.md
+    §9): high -> better at grass, worse at fruit; low -> the reverse, the tradeoff
+    mediated by `cfg.forage_tradeoff` in `dynamics.graze`/`eat_fruit`. This is a plain
+    two-sided `sigmoid` (like `diet_of`), NOT the one-sided `clip(sigmoid-0.5, 0, None)`
+    of escape/armor/spike: those are one-way investments you either buy or not, whereas
+    forage_pref is a *dial between two resources* -- both ends are meaningful and the
+    neutral middle (0.5) is the natural unbiased start. Read per-agent inside grazing;
+    it carries no metabolic tax (the grass/fruit tradeoff is its own cost), so unlike
+    the defence genes it never touches `metabolize`.
+    """
+    return jax.nn.sigmoid(genome[:, cfg.forage_pref_index])
+
+
 def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
     k_pos, k_head, k_gen, k_hue, k_plant, k_carn, k_rej = jax.random.split(key, 7)
     n = cfg.n_max

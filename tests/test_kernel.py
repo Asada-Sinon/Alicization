@@ -17,8 +17,8 @@ from underworld import Config, new_world
 from underworld import dynamics, memory, reproduction
 from underworld import genome as genome_mod
 from underworld import terrain as terrain_mod
-from underworld.state import (armor_of, attack_range_of, escape_of, init_state,
-                              invest_of, size_of, spike_of)
+from underworld.state import (armor_of, attack_range_of, escape_of, forage_pref_of,
+                              init_state, invest_of, size_of, spike_of)
 
 
 # Small, fast config for tests.
@@ -726,6 +726,86 @@ def test_defence_genes_recombine_unlike_size():
     # i.e. the columns are not frozen to parent A the way size/diet are.
     assert np.any(mixed[:, cfg.armor_index] == 3.0), "armour must recombine"
     assert np.any(mixed[:, cfg.spike_index] == 3.0), "spike must recombine"
+
+
+def _forage_state(cfg, genes):
+    """Living herbivores, one per gene in `genes`, each in a DIFFERENT plant cell
+    over abundant grass and fruit, so grazing/fruit intake is uncontested and never
+    field-limited -- isolating the `forage_pref` multiplier from competition and
+    depletion. Agent i carries forage_pref gene `genes[i]`; diet is pinned deeply
+    herbivorous so `_herbivory` is ~1 and identical for all, so any difference in
+    intake is the forage_pref dial alone."""
+    from underworld.state import diet_of
+    terrain = terrain_mod.build(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(0), terrain)
+    n = cfg.n_max
+    k = len(genes)
+    alive = jnp.arange(n) < k
+    genome = jnp.zeros((n, cfg.genome_size)).at[:, cfg.diet_index].set(-6.0)
+    for i, g in enumerate(genes):
+        genome = genome.at[i, cfg.forage_pref_index].set(float(g))
+    # Distinct cells (cell size = world/grid): well-separated so no two share a cell.
+    cs = cfg.world_size / cfg.grid
+    pts = [jnp.array([cs * (3 * i + 1) + 0.5, cs * (3 * i + 1) + 0.5]) for i in range(k)]
+    pos = state.pos
+    for i, p in enumerate(pts):
+        pos = pos.at[i].set(p)
+    return state._replace(
+        alive=alive, genome=genome, diet=diet_of(genome, cfg), pos=pos,
+        plant=jnp.full(cfg.n_cells, 100.0), fruit=jnp.full(cfg.n_cells, 100.0))
+
+
+def test_forage_pref_neutral_when_tradeoff_off():
+    """forage_tradeoff=0 (the default) makes the forage_pref gene behaviourally inert:
+    grazing and fruit intake are identical for a grass-biased, a fruit-biased and a
+    neutral agent, all reproducing the pre-gene kernel (docs/multispecies_feasibility.md
+    §9). The gene still exists and drifts -- it just does nothing here, the clean
+    baseline arm (same convention as armor_heritable=off)."""
+    cfg = tiny_cfg()          # forage_tradeoff defaults to 0.0
+    assert cfg.forage_tradeoff == 0.0
+    state = _forage_state(cfg, [6.0, -6.0, 0.0])   # hi-grass, hi-fruit, neutral
+    _, _, food, _ = dynamics.graze(state, cfg)
+    _, _, fruit, _ = dynamics.eat_fruit(state, cfg)
+    food, fruit = np.asarray(food), np.asarray(fruit)
+    # All three foragers pull identical grass and fruit despite opposite pref genes.
+    assert food[0] == pytest.approx(food[1], rel=1e-6)
+    assert food[0] == pytest.approx(food[2], rel=1e-6)
+    assert fruit[0] == pytest.approx(fruit[1], rel=1e-6)
+    assert fruit[0] == pytest.approx(fruit[2], rel=1e-6)
+
+
+def test_forage_pref_partitions_grass_and_fruit_when_on():
+    """With forage_tradeoff>0 a high-pref agent grazes MORE grass and LESS fruit, and a
+    low-pref agent the reverse -- the resource-partitioning tradeoff
+    (docs/multispecies_feasibility.md §9)."""
+    cfg = tiny_cfg(forage_tradeoff=0.5)
+    state = _forage_state(cfg, [6.0, -6.0])        # agent 0 grass-biased, agent 1 fruit
+    _, _, food, _ = dynamics.graze(state, cfg)
+    _, _, fruit, _ = dynamics.eat_fruit(state, cfg)
+    food, fruit = np.asarray(food), np.asarray(fruit)
+    assert food[0] > food[1]      # grass specialist grazes more grass
+    assert fruit[0] < fruit[1]    # ...and less fruit than the fruit specialist
+
+
+def test_forage_pref_tradeoff_conserves_total_efficiency():
+    """The tradeoff must not hand out more TOTAL forage -- the two per-layer multipliers
+    sum to 2, so a grass specialist's gain on grass is paid for one-for-one by its loss
+    on fruit (docs/multispecies_feasibility.md §9). Measured as the normalised total
+    intake (grass/eat_rate + fruit_taken/fruit_eat_rate): equal across a grass-biased,
+    fruit-biased and neutral forager, so no pref systematically buys more food."""
+    cfg = tiny_cfg(forage_tradeoff=0.5)
+    state = _forage_state(cfg, [6.0, -6.0, 0.0])
+    _, _, food, _ = dynamics.graze(state, cfg)
+    _, _, fruit_gain, _ = dynamics.eat_fruit(state, cfg)
+    food = np.asarray(food)
+    taken = np.asarray(fruit_gain) / cfg.fruit_energy       # undo fruit_energy
+    total = food / cfg.eat_rate + taken / cfg.fruit_eat_rate
+    # Grass and fruit specialists reach the same total as the neutral forager: the
+    # dial moves efficiency BETWEEN layers, never adds to the sum.
+    assert total[0] == pytest.approx(total[2], rel=1e-5)
+    assert total[1] == pytest.approx(total[2], rel=1e-5)
+    # And the high-grass agent's total is not larger than neutral (no free lunch).
+    assert total[0] <= total[2] + 1e-5
 
 
 def test_child_water_investment_clamped_to_own_tank():
@@ -1632,7 +1712,8 @@ def test_trait_gene_indices_are_distinct_and_in_range():
     layout the whole trait-evolution programme rests on."""
     cfg = Config()
     idxs = [cfg.diet_index, cfg.invest_index, cfg.size_index,
-            cfg.attack_index, cfg.escape_index, cfg.armor_index, cfg.spike_index]
+            cfg.attack_index, cfg.escape_index, cfg.armor_index, cfg.spike_index,
+            cfg.forage_pref_index]
     assert len(set(idxs)) == len(idxs), "trait gene indices collide"
     assert min(idxs) == cfg.brain_params, "traits must start right after the brain block"
     assert max(idxs) < cfg.genome_size, "a trait index falls outside the genome"

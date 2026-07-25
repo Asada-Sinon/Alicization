@@ -158,3 +158,98 @@ diet 差/相似构造），要分辨第三物种要么复用 diet 派生交互�
 （动 `in_dim`、作废全脑，代价大，仅当基础版证明价值后）；（b）加独立 `scavenge` trait 基因做成
 **真·腐食者物种**（trait_dim+1，与 diet 正交的专食腐位）。可视化上腐食者聚到死亡点是天然的"新物种"
 观感（`server/protocol.py` 可加一路 carrion 场着色，仿昼夜/水层）。
+
+---
+
+## 9. 资源分割第二食草者（forage_pref，草↔果权衡基因，2026-07-25，run_id 待定）
+
+按 §4 次选（§2(c3)）落地了**草↔果取食权衡基因**——不是新物种，也不是新营养级，而是给现有食草者
+一条**生态位分化**的演化通道：世界本就有 grass(`plant`) 与 fruit 两个食草层，此前被同一条
+`_herbivory(diet)` taper 统一取食，人人对两层同等（无）能。引入一个权衡基因后，个体可专精一层、
+牺牲另一层；若该基因**演化出双峰分布**，就是**性状替代 / character displacement**——两个食草生态位
+分占两种资源的证据。
+
+### 9.1 机制（`trait_dim` 7→8）
+
+`[对应]` 逐文件，最省的 trait 级改动（**零 `in_dim` 改动、零新场**，仅 genome 加一列）：
+
+- `config.py`：`trait_dim=8`；`@property forage_pref_index = brain_params + 7`；新增强度旋钮
+  `forage_tradeoff: float = 0.0`（**默认关**）与 `forage_pref_mutation_sigma=0.02`（慢档，同
+  size/escape/armor）。
+- `state.py`：`forage_pref_of = sigmoid(genome[:, forage_pref_index])`，映射 [0,1]，**gene=0 → 0.5
+  = 不偏**（两端对称、中点中性，是 diet_of 式的**双边** sigmoid，区别于 escape/armor 的单边
+  `clip(sigmoid-0.5,0)`——后者是"买不买"的单向投资，forage_pref 是"两资源之间的拨盘"，两端都有意义）。
+- `genome.py`：`mutate` 给该列设慢档 sigma；**crossover 不豁免**（不进感觉-运动回路，同 escape/armor，
+  保持 G 矩阵估计干净）。
+- `dynamics.py`：`_forage_pref_scale` 返回 `(grass_mult, fruit_mult)`，以 `s=2·pref−1 ∈[−1,1]`
+  （gene=0→s=0）给出 `grass_mult = clip(1 + forage_tradeoff·s, 0)`、`fruit_mult = clip(1 −
+  forage_tradeoff·s, 0)`——**两乘子恒和为 2**（§9.2）。`graze` 用 `grass_mult`、`eat_fruit` 用
+  `fruit_mult` 调制各自 `demand`，**编译期 gate 于 `forage_tradeoff>0`**：默认关时整段不进 trace、
+  取食 bit-exact 旧内核（gene 只是加宽 genome）。
+- `metrics.py`：append `mean_forage_pref`/`forage_pref_std`/`herb_forage_pref`（herb 是功能载体，
+  仿 herb_escape/herb_armor）。**不动 wire/协议**（`encode` 按名 `.get` 取字段，新字段不打包即不影响
+  偏移）。
+
+`[对应] 权衡挂点是取食效率、不是能量税`：与 armor/escape 不同，forage_pref **不进 `metabolize`**——
+它没有单独的能量账代价，**权衡本身就是代价**（草专家吃果差）。这正是"总效率守恒"的来源。
+
+### 9.2 为什么"总效率守恒"是关键设计（no free lunch）
+
+`[对应]` 两乘子恒和为 2 ⟹ 一个个体在草上多得的效率，**一对一**由它在果上的损失偿付。若不守恒
+（比如只给 grass 加成、不扣 fruit），基因就成了**纯增益**，会无约束跑向极值、无法证伪——正如
+`docs/trait_roadmap.md` §7.4 对无代价基因饱和的警告。守恒把它变成**真权衡 → 内点/分化均衡**：
+单一策略无法通吃两层，专精才有净收益，这是资源分割能被选择的前提。
+
+`[本世界实测]` 单元测试守住三点（`tests/test_kernel.py`）：
+- `test_forage_pref_neutral_when_tradeoff_off`：`forage_tradeoff=0` 时草/果基因个体与中性个体取食
+  完全相同（gene 行为中性、复现旧内核）。
+- `test_forage_pref_partitions_grass_and_fruit_when_on`：`forage_tradeoff=0.5` 时高 pref 个体吃草多、
+  吃果少，低 pref 反之。
+- `test_forage_pref_tradeoff_conserves_total_efficiency`：归一化总取食
+  （grass/eat_rate + fruit_taken/fruit_eat_rate）在草专家/果专家/中性三者间相等——拨盘只在两层间
+  **搬移**效率，不抬高总和。
+
+### 9.3 演化验证设计（先写后跑，四标签，**尚未跑**）
+
+- **假设**：开启权衡（`forage_tradeoff=0.5`）后，`forage_pref` 基因在食草谱系里**演化出双峰分布**
+  （性状替代）——种群分裂为"草专家"与"果专家"两个食草生态位，而非停在中性 0.5 的单峰。
+- **臂**（基因组布局相同、可直接配对）：主消融 `forage_tradeoff` **0.5(ON) vs 0.0(OFF)**——回答
+  "让草↔果权衡生效是否驱动生态位分化"。OFF 臂 gene 中性漂变（照 escape/armor 的存在性判据体例）。
+- **成功判据**（6 配对种子起，n=6 配对 Wilcoxon 的 p 地板 0.031）：
+  1. **分化信号**：`forage_pref_std`（方差）ON > OFF，6/6 同向、配对 Wilcoxon p≤0.05。方差是**双峰性
+     的必要下界**——单峰收窄给低方差，两簇分占 0 与 1 给高方差。
+  2. **真双峰判定**（比方差更强）：离线读末态 `genome[:, forage_pref_index]` 的 `forage_pref_of`
+     分布，做 Hartigan dip test 或双高斯 vs 单高斯 BIC；ON 臂显著双峰、OFF 臂单峰=证实性状替代。
+     （`--json` 只给标量方差，双峰需存末态 genome，见 provenance。）
+  3. **载体正确**：`herb_forage_pref` 是食草谱系的实际拨盘；分化应主要发生在 `is_herb`（diet<0.35）
+     里，`carn` 的 forage_pref 应近中性漂变（食肉者几乎不取食植物，pref 对其近中性）。
+- **护栏**（照 §7 carrion / `attack_range_redqueen.md` §5）：`population` 与 `carnivore_frac` 不显著
+  恶化、不灭绝不爆炸；`death_thirst_frac` 不显著上升（权衡挂在取食效率、不该动水账，但果层多在林
+  内、专精可能改变空间利用，须核）。
+- **统计纪律**：配对 Wilcoxon + 10000 次 bootstrap 95% CI，**报告算过的每个 p**，**不做 Bonferroni**；
+  **伪重复诚实标注**（`terrain.build` 无 RNG，6 种子同一张地图 → 结论只对**这一套河系/林果格局**成立，
+  推广需交叉 `ridge_wavenumber` / `fruit_wavenumber_x/y` 等地形种子）。
+- **负结果预案**：
+  - **若 `forage_pref_std` ON≈OFF（无分化）**：最可能因**果层太稀/太边缘**——`fruit` 只落在
+    canopy² 的 ~小片（`fruit_patch_threshold`），果专精的可及回报不足以支撑一个专家谱系（与 §7
+    carrion "碰不到"同类失败：资源太稀 → 专精无利可图 → 拨盘漂回中性）。诊断先看 `fruit_total` 与
+    食草者对果层的实际取食占比。
+  - **若方差升但非双峰（宽单峰/连续梯度）**：是**性状变异扩大而非离散生态位分化**——分化被
+    `assortative_mating` 只按 diet 排序、拿不到按 forage_pref 的生殖隔离所限（§2(b)(iii) 同款约束）。
+    记为"变异有、离散分化无"，并指向"若要真双峰可能需按 forage_pref 的隔离脚手架"。
+  - **若护栏恶化**（pop/carn_frac 掉）：判断是"果专精挤兑草层削薄食草基座"还是别的耦合，记录并否掉
+    默认开启。
+- **provenance**：`--set forage_tradeoff=0.5` 开 ON 臂；ON/OFF 各 6 配对种子 ×≥20000 步；存
+  `outputs/<run_id>/` 完整 config + git hash + seed 列表 + **末态 genome**（双峰检验需要，标量方差不够）；
+  分析脚本写 `explorations/<run_id>/`。**本次只落机制与设计，不跑 6 种子。**
+
+### 9.4 落地状态（本次）
+
+`[本世界实测]` 机制已落地、单元契约三测全绿、`check.py --contracts`/tier2/pytest 全过；**默认关**
+（`forage_tradeoff=0.0`）故取食对 gene 中性。**golden 重 bless**：`trait_dim` 7→8 使 `genome_size`
+1385→1386，`init_state` 的 `jax.random.normal(k_gen,(n,genome_size))` 抽样形状变 → founder RNG 重排 →
+整条混沌轨迹漂移（**即便 gene 是 no-op**）：population 1517→1591、fruit_total 29.18→40.35、
+carnivore_frac 0.00989→0.00691。这是加任何 trait 基因不可躲的固定契约代价
+（`docs/trait_addition_feasibility.md` §A.3、armor 5→7 同款先例 `docs/trait_defense_landing.md` §3），
+**已 `--bless` 重录，非放宽 band、非行为改变**（默认 tradeoff=0 时取食 bit-exact 旧内核，见 §9.2 中性
+测试）。**演化是否真出双峰仍待 §9.3 的 6 配对种子验证。**

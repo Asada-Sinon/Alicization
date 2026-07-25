@@ -9,8 +9,8 @@ import jax
 import jax.numpy as jnp
 
 from .config import Config
-from .state import (WorldState, armor_of, attack_range_of, escape_of, pos_to_cell,
-                    spike_of)
+from .state import (WorldState, armor_of, attack_range_of, escape_of, forage_pref_of,
+                    pos_to_cell, spike_of)
 
 
 def _herbivory(diet: jax.Array, cfg: Config) -> jax.Array:
@@ -31,6 +31,29 @@ def _forage_heat_scale(state: WorldState, cfg: Config) -> jax.Array:
     """
     light = 0.5 * (1.0 - jnp.cos(2.0 * jnp.pi * state.phase))
     return jnp.clip(1.0 - cfg.forage_heat * light, 0.0, None)
+
+
+def _forage_pref_scale(state: WorldState, cfg: Config):
+    """Grass/fruit efficiency multipliers from the `forage_pref` gene -- resource
+    partitioning between the two herb layers (docs/multispecies_feasibility.md §9).
+    Returns `(grass_mult, fruit_mult)`.
+
+    With `s = 2*pref - 1` in [-1, 1] (0 at gene=0, so an unbiased forager):
+        grass_mult = clip(1 + forage_tradeoff * s, 0)
+        fruit_mult = clip(1 - forage_tradeoff * s, 0)
+    The two ALWAYS sum to 2, so the gene moves efficiency BETWEEN grass and fruit
+    without ever handing out more total forage -- a grass specialist is simply worse
+    at fruit (no free lunch, which is what makes the partitioning measurable rather
+    than a pure gain that would peg the gene at an extreme). Only ever called inside a
+    `cfg.forage_tradeoff > 0` branch, so when the tradeoff is off this code is absent
+    from the trace and grazing is bit-exact the pre-gene kernel (same compile-time-gate
+    convention as `_forage_heat_scale`/fear/day-night). The clip guards t>1; at the
+    documented t=0.5 the multipliers stay in [0.5, 1.5] and never reach it.
+    """
+    s = 2.0 * forage_pref_of(state.genome, cfg) - 1.0
+    grass = jnp.clip(1.0 + cfg.forage_tradeoff * s, 0.0, None)
+    fruit = jnp.clip(1.0 - cfg.forage_tradeoff * s, 0.0, None)
+    return grass, fruit
 
 
 def act(state: WorldState, outputs: jax.Array, terrain, cfg: Config):
@@ -100,6 +123,13 @@ def graze(state: WorldState, cfg: Config):
     # predator-prey oscillation.
     herbivory = _herbivory(state.diet, cfg)
     demand = cfg.eat_rate * herbivory * state.alive            # [n_max]
+    # Resource partitioning (docs/multispecies_feasibility.md §9): the grass-side of
+    # the forage_pref tradeoff scales grazing efficiency. Compile-time gated on
+    # forage_tradeoff>0, so at the default 0 this is absent and grazing is bit-exact
+    # the pre-gene kernel (the gene only widens the genome, moving founders' RNG).
+    if cfg.forage_tradeoff > 0.0:
+        grass_mult, _ = _forage_pref_scale(state, cfg)
+        demand = demand * grass_mult
     if cfg.day_length > 0:
         demand = demand * _forage_heat_scale(state, cfg)
 
@@ -124,6 +154,12 @@ def eat_fruit(state: WorldState, cfg: Config):
     cell = pos_to_cell(state.pos, cfg)
     herbivory = _herbivory(state.diet, cfg)
     demand = cfg.fruit_eat_rate * herbivory * state.alive
+    # Resource partitioning (docs/multispecies_feasibility.md §9): the fruit-side of the
+    # tradeoff -- the mirror of grazing's grass_mult (the two sum to 2). Same compile-
+    # time gate, so at forage_tradeoff=0 fruit foraging is bit-exact the pre-gene kernel.
+    if cfg.forage_tradeoff > 0.0:
+        _, fruit_mult = _forage_pref_scale(state, cfg)
+        demand = demand * fruit_mult
     if cfg.day_length > 0:
         demand = demand * _forage_heat_scale(state, cfg)
 
