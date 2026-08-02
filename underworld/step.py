@@ -219,7 +219,13 @@ def build_step(cfg: Config, terrain):
             diet=diet_of(state.genome, cfg),
         )
 
-        return state, metrics.compute(state, terrain, deaths, cfg)
+        # `food_gain`/`fruit_gain` are this step's per-agent intake from the two
+        # plant layers, captured back at stage 4 before death and birth reshuffled
+        # the slots. Summed in `metrics.compute` they give each layer's realised
+        # supply -- the only honest measure of how big a foraging niche actually
+        # is (docs/multispecies_program.md §5).
+        return state, metrics.compute(state, terrain, deaths, cfg,
+                                      food_gain, fruit_gain)
 
     return jax.jit(world_step)
 

@@ -1871,3 +1871,40 @@ def test_trait_gene_indices_are_distinct_and_in_range():
     # in_dim must match the documented channel formula (5 retina + 3 scalars +
     # 4/slot memory + 1 peer retina channel).
     assert cfg.in_dim == 6 * cfg.retina_sectors + 3 + 4 * cfg.memory_slots
+
+
+def test_intake_flux_splits_by_layer_and_sums_to_the_whole():
+    """The two intake-flux metrics must partition plant-derived energy by source.
+
+    Written because `fruit_total` (standing stock) measured the wrong thing: a
+    layer eaten to zero the instant it grows reads as ~0 standing while still
+    feeding the population, so standing stock understates niche size by an order
+    of magnitude (docs/multispecies_program.md §5). These metrics measure supply
+    instead, and the invariant is that the two shares partition the whole.
+    """
+    cfg = tiny_cfg()
+    _state, ms = run(cfg, 120)
+    graze = np.asarray(ms.graze_gain)
+    fruit = np.asarray(ms.fruit_gain)
+    frac = np.asarray(ms.frugivory_frac)
+    assert np.all(np.isfinite(graze)) and np.all(np.isfinite(fruit))
+    assert graze.min() >= 0.0 and fruit.min() >= 0.0, "intake flux cannot be negative"
+    assert graze.sum() > 0.0, "grass must supply something over 120 steps"
+    assert np.all((frac >= 0.0) & (frac <= 1.0)), "frugivory share must be a fraction"
+    total = graze + fruit
+    fed = total > 0.0
+    assert np.allclose(frac[fed], fruit[fed] / total[fed], atol=1e-5), \
+        "frugivory_frac must be exactly fruit / (grass + fruit)"
+
+
+def test_intake_flux_is_zero_for_a_switched_off_fruit_layer():
+    """`--set fruit_max=0` is a live ablation arm; with no fruit layer the fruit
+    flux must be identically zero and the frugivory share must collapse to 0 --
+    not NaN from a 0/0, which is what the guard in `frugivory_frac` is for."""
+    cfg = tiny_cfg(fruit_max=0.0)
+    _state, ms = run(cfg, 60)
+    assert float(np.asarray(ms.fruit_gain).sum()) == 0.0, \
+        "a switched-off fruit layer must supply exactly nothing"
+    frac = np.asarray(ms.frugivory_frac)
+    assert np.all(np.isfinite(frac)), "frugivory_frac went non-finite (0/0 guard failed)"
+    assert float(frac.sum()) == 0.0

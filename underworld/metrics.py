@@ -115,9 +115,22 @@ class Metrics(NamedTuple):
     herb_forage_pref: jax.Array  # herbivore-lineage mean, the real foragers
     alarm_total: jax.Array      # standing shared-alarm mass (docs/multispecies_
     #                             feasibility.md §8); 0 when alarm_rate is off
+    # Intake FLUX, not standing stock (docs/multispecies_program.md §5). The whole
+    # R1 probe went wrong on this distinction: `fruit_total` measures what is LEFT
+    # on the field, and a layer that is grazed to zero the instant it appears reads
+    # as ~0 standing while still feeding the population. Niche size is what a layer
+    # SUPPLIES per step, so these three sum this step's actual energy intake by
+    # source. `frugivory_frac` is the one that answers "is there a second bowl":
+    # the share of plant-derived energy that came from fruit rather than grass.
+    # Appended, never inserted (run_headless and protocol.encode read by name).
+    graze_gain: jax.Array       # energy the population drew from GRASS this step
+    fruit_gain: jax.Array       # energy the population drew from FRUIT this step
+    frugivory_frac: jax.Array   # fruit / (grass + fruit); 0 when nothing was eaten
 
 
-def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
+def compute(state: WorldState, terrain, deaths, cfg: Config,
+            graze_gain: jax.Array | None = None,
+            fruit_gain: jax.Array | None = None) -> Metrics:
     alive = state.alive.astype(jnp.float32)
     pop = jnp.sum(alive)
     denom = jnp.maximum(pop, 1.0)
@@ -194,6 +207,16 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
     forage_pref_var = jnp.sum(((forage_pref - mean_forage_pref) ** 2) * alive) / denom
     herb_forage_pref = jnp.sum(forage_pref * is_herb) / herb_n
 
+    # Intake flux by source. The two gain arrays are the per-agent energy deltas
+    # `dynamics.graze` / `dynamics.eat_fruit` returned earlier in this same step,
+    # so they are already alive-masked; summing them gives the layer's realised
+    # supply. They are optional so a caller that only wants state metrics (tests,
+    # ad-hoc probes) need not thread them through -- absent, the flux reads 0.
+    z = jnp.zeros((), jnp.float32)
+    grass_flux = z if graze_gain is None else jnp.sum(graze_gain)
+    fruit_flux = z if fruit_gain is None else jnp.sum(fruit_gain)
+    plant_flux = grass_flux + fruit_flux
+
     return Metrics(
         population=pop,
         mean_energy=jnp.sum(state.energy * alive) / denom,
@@ -249,4 +272,7 @@ def compute(state: WorldState, terrain, deaths, cfg: Config) -> Metrics:
         forage_pref_std=jnp.sqrt(forage_pref_var),
         herb_forage_pref=herb_forage_pref,
         alarm_total=jnp.sum(state.alarm),
+        graze_gain=grass_flux,
+        fruit_gain=fruit_flux,
+        frugivory_frac=jnp.where(plant_flux > 0.0, fruit_flux / plant_flux, 0.0),
     )
