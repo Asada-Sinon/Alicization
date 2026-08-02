@@ -28,6 +28,65 @@
 
 ---
 
+## Session 2026-08-02→03（夜间自主，用户睡前授权：局部多物种生态箱 + 可视化）
+
+- 授权: 用户定盘长期目标「**局部的多物种生态箱演化 + 可视化结果**」，要求**先把工作流设计成
+  一个循环**再一直跑下去、别干一半停，并授权分 agent 做测评。也交代了 push 走 `asada-sinon`
+  （已设 repo-local 身份 `Asada-Sinon <weibinkong.research@gmail.com>`，与全部历史提交一致）。
+- **工作流已定死**: `docs/multispecies_program.md`——纲领 §1 / **七道闸 §2** / 回合台账 §3 /
+  backlog §4。下个 session **从 §4 backlog 顶部取题**，不要另起炉灶。
+- 完成（生态线，5 个回合全部落档 + push）:
+  - **纲领**: 多物种三次失败是同一根因的三个投影——**这个世界只有一个饭碗（河岸的草）**。
+    顺序定为「先造生态位，再谈物种」。
+  - **R1 判据自身被证伪**（§5）: 现存量量的是「剩多少」不是「供多少」，把生态位低估约一个
+    数量级。产出 = `Metrics` 三个流量观测量 `graze_gain`/`fruit_gain`/`frugivory_frac`。
+  - **R1b 不通过**（§7）: 份额做到 0.22（6/6、p=0.031）但渴死护栏破 2–3/6。顺带更正自己一句
+    过度解读（林冠移动对着零模型读几乎可忽略）。
+  - **R1c 不通过且我的诊断被推翻**（§8）: 真因是**承载力**不是水口径——种群超调与渴死增量
+    ρ=+0.90，`mean_water` 三臂对基线全无显著变化。
+  - **§10 跨回合命题**: **水限世界里加食物只会变成更多身体。** 「加厚食物层造生态位」整条路
+    证伪，负结果已进 `docs/experiments.md §5`。
+  - **R3 判为「无法判定」**（§11）: 字面上不通过，但**判据容差 ≈ 1 个复现噪声 SD**，通过/不通过
+    都没有信息量。**资源轴挂起，不宣布关闭也不宣布成功。**
+- 完成（**方法学，本轮真正的头号产出**）: `docs/run_to_run_variance.md`
+  - **`--seed` 在 20000 步上控制不住这个世界。** 18 个默认配置 run（3 重复 × 6 种子）方差分解：
+    `late_carn`/`death_thirst_frac`/`total_flux` 的**创始者方差分量为 0**，`carnivore_frac`
+    ICC 仅 0.130、`population` 0.259。同一个种子能跑出 `carnivore_frac` 0.060–0.2505。
+    seed 3 复现（n=6）同量级或更大——**普适，不是某颗种子的特例**。
+  - 后果：**配对差噪声 = `√2 × 同种子 SD`**，`carn_frac` 是 0.0625，而 `conventions.md §5` 用的
+    跨种子 SD ±0.012 **低估 5.2 倍、样本量低估约 27 倍**。ICC≈0 的指标**配对完全无用**。
+    `conventions.md` 已补 §9.1（这是事实更正，不是规则变更）。
+  - §6 给每条旧结论标了「效应量/噪声」比值：**红皇后 2.4、armor 1.19 站得住；恐惧场 0.32、
+    pred_nocturnal 0.53 降级待重测**。**已发表的 p 值本身没错**（算的是实测配对差）。
+- 完成（可视化交付，用户点名要的）: Artifact
+  **https://claude.ai/code/artifact/285960f6-abfd-465f-8d82-e50cdc61bf6d**（默认私有）——
+  五个回合的判决、基线 vs 再分配的**两张世界对照图**、三张图表（剂量响应 / 方差分解 / 旧结论
+  重估）。另外**仪表盘现在能接 `--set`** 了（`UNDERWORLD_SET` 环境变量），
+  例：`.venv/bin/python scripts/run_live.py --no-open --set fruit_energy=4.0`。
+- **PENDING（下个 session 第一件事，按顺序）**:
+  1. **看 R2 结果**（`outputs/20260803-partition/`，36 run = 2 臂 × 6 种子 × **3 重复**，
+     `docs/multispecies_program.md §9`）。问题：给了真正的第二个饭碗（果层供能 28%）之后，
+     `forage_pref` 会不会分化？**R3 答不了这个**——那轮 `forage_tradeoff` 停在默认 0.0、
+     基因被编译期切断。判决派 result-analyst，判据在 §9.3（P1/P2/P3）。
+  2. **把三件待拍板的事拿给用户**（见下「要用户拍板」）。**不要自己挑一个开跑。**
+- **要用户拍板（三件，都会改变后续所有工作的成本或世界行为）**:
+  1. **统计协议改为每格 k=3 重复**（`run_to_run_variance.md §7`）。代价 run 数 ×3
+     （一轮 30 分钟 → 90 分钟）。不改的后果：近阈值指标上的判决继续是抛硬币。
+  2. **生殖隔离**：`assortative_mating` 从只按 `diet` 排序扩到也按 `forage_pref` 排序
+     （动 `reproduction._assortative_mate`，不作废种群）。若 R2 显示分化被基因流压平，
+     这是唯一剩下的路。
+  3. **是否接受「刻意压缩的微缩世界」**——承载力由水锁死这条约束会一直挡在多物种前面。
+- 坑:
+  - **Bash 工具跑的是 zsh，未加引号的变量不做词分割**。多参数 sweep 一律写成
+    `bash <script>.sh` 并用数组传公共臂（`D=(--set a=1 --set b=2)` + `"${D[@]}"`），
+    否则整串被塞给 argparse、秒退。已进 `MEMORY.md [LEARN:tooling]`。
+  - **确定性 XLA 算子（`--xla_gpu_deterministic_ops=true`）在 20000 步上 >20× 慢**，
+    100 分钟跑不完，别再试。「它能否消除散度」**仍未测**，别写成已知。
+  - **`fruit_water_frac` 是本轮新增的默认关旋钮**（默认 0.10 = `forage_water_frac`，逐位等价，
+    golden 未动）。`fruit_energy` 抬高时果实每卡路里会变干，要用它补。
+  - `outputs/20260803-*` 与 `20260802-*` 下有本轮全部产物（gitignored）；分析脚本在
+    `explorations/20260802-fruit-flux/`、`20260803-fruit-water/`、`20260803-repartition/`。
+
 ## Session 2026-07-25（白天，用户在场：三通路落地 + 6 种子判决）
 
 - 承接夜间 PENDING（用户 #4 多性状 / #5 种间合作），用户拍板**三个方向全做**、分 worktree agent 并行实现。
@@ -88,36 +147,3 @@
   - 新增默认关旋钮：`density_repro_penalty=0`（L6）、`carrion_enabled=False`（腐食）——都 bit-exact 旧
     世界、golden 未动。armor/spike/venom 是 trait_dim 5→7 + venom 场，golden 已按那些重 bless。
   - `.venv` 外的 `python3` 也被 PREALLOCATE hook 拦——纯 JSON 解析脚本也要加 `XLA_PYTHON_CLIENT_PREALLOCATE=false` 前缀。
-
-## Session 2026-07-24
-
-- 完成: 昼夜系统整条线落地，8 次 commit 全部 push（`main...origin/main` 干净）。
-  - 先同步 `docs/TODO.md` 队列（`9fa7893`）。
-  - **昼夜 Phase 1**（`d9ae171`）：全局标量 `phase` 时钟 + 暗→视野 + move-only 热，默认关、
-    逐位可逆。加相位分箱探针 `scripts/probe_diel.py`。
-  - **五杠杆并行探索**（workflow，`c1d1477`）：move_heat/forage/activity_energy/pred_nocturnal/
-    torpor。判决：**"捕食者搬离河岸"结构不可达**（水太硬）；碰水杠杆靠剔除破渴死；水中性杠杆
-    安全但空间惰性；**pred_nocturnal 唯一干净阳性**（捕食风险昼夜错峰、还降渴死）。
-  - **pred_nocturnal 落地 + 验证 + 默认开启**（`9332323`/`271980d`/`8096bda`）：夜间捕食者射程↑。
-    amp=1.0 6 种子：hunt_success 夜−昼 +0.245（6/6）、thirst −13pp（6/6）、carn_frac +3.3pp（6/6）。
-    **已默认开启**：`day_length=400` + `pred_night_amp=1.0`，热/暗/觅食默认关（只跑这一条已验证
-    杠杆）。golden 重 bless。`--set day_length=0` 逐位回退。
-  - **Phase 2（演化空间通勤）证伪**（`45f482f`/`32c6a1a`）：`forage_heat` 底座落地（默认关），
-    `--set hidden=24/32` 加大脑。40k/24 与 100k/32/组合底座/2 种子一致：**没长出空间通勤、加大脑
-    不帮忙**。根因大概率缺动态选择压（静态地形）。同 `mutation_sigma` 类负结果。
-- PENDING: **下一个方向待用户定盘**——昼夜整条线已收口。候选：①密度 D（压 carn_frac，但注意
-  pred_nocturnal 刚把它抬了 +3.3pp、基线变了）；②别的。不要自己挑一个开跑。若继续碰昼夜：唯一
-  剩的实验是"演化通勤需要动态环境"（超出昼夜范围、大工程），按现有证据不建议。
-- 坑:
-  - **`day_length` 现在默认 400（昼夜默认开）**：所有实验默认带昼夜捕食。要昼夜前的旧基线做对照，
-    一律 `--set day_length=0`（编译期分支、逐位复现）。别拿旧分支数字直接比。
-  - **golden 已按昼夜默认开重 bless**（population 1549→1494、carn_frac 0.005→0.017 等）。
-  - **GPU 驱动会话中途被更新过一次**（580.159→580.173），当时半更新态让 CUDA 降级、JAX 悄悄回落
-    CPU、探针跑了一个多小时不出结果；`nvidia-smi` 报 NVML 版本不匹配是信号。重启修复。教训已进
-    `MEMORY.md`。当时慌乱中把 golden 误 bless 成坏驱动下的 1474（`c2dbefe`），重启后证实正确值是
-    1549、已还原（`8e29ada`）。
-  - 四个未选中的昼夜杠杆（forage 已入库作 Phase 2 底座；activity_energy/torpor/heat 只在 workflow
-    临时 worktree 跑过、**未入库**）。`.claude/worktrees/` 下有一堆死 agent 的孤儿 worktree，可清。
-  - `scripts/probe_diel.py` 已入库（相位分箱探针，通用）；Phase 2 探针 `phase2_probe.py` 在
-    scratchpad、未入库（一次性）。
-
