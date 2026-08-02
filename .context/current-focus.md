@@ -2,30 +2,32 @@
 
 只写此刻在做的那一件事。方向变了就整个重写，不要往下堆。超过一屏说明该拆了。
 
-## 当前目标（2026-07-25 夜，自主授权收尾）
+## 当前目标（2026-08-02，用户睡前授权自主长跑）
 
-用户睡前自主授权的整批工作已基本完成并推送。收尾中：等 `20260725-carrion` 6 种子重跑
-（第一次因 GPU 超订 OOM，改 2 波×6 重跑），填 `multispecies_feasibility.md` §7 结果，做最后
-一次状态提交，然后本轮结束。
+用户定盘：**局部的多物种生态箱演化**，终点要**看得见的可视化结果**。要求先设计成一个
+可反复执行的循环工作流，然后一直跑下去，不许干一半停。
 
-## 本轮已完成（全部已 push 到 main）
+工作流已定死在 `docs/multispecies_program.md`（纲领 §1 / 七道闸 §2 / 台账 §3 / backlog §4）。
+**此刻在跑 R1：果层供给扫描。**
 
-- **防御性状**：armor 演化验证 ✅（6 种子 p=0.031）、尖刺重设计（进攻侧盘活/防御侧未活）、
-  可视化 wire v8/v9（厚皮/尖刺/中毒染绿 + inspector）。
-- **食草过多判决**：四条降密度杠杆全部失败（`herbivore_overpopulation.md §6`），根因水限+尺度
-  不变，诚实建议承认刻意压缩、不改默认。
-- **两个默认关新机制**：L6 密度制约繁殖（`bd8107f`）、腐食通路 carrion/scavenge（`37dda74`）。
-- **三份调研报告** + MEMORY 教训（跑实验前先提交）。
+## 纲领一句话
 
-## PENDING（下个 session 第一件事）
+多物种失败的三次判决（diet 中段死区 / forage_pref 证否 / 腐食稀薄）是**同一个根因的三个投影**：
+**这个世界只有一个饭碗（河岸的草），所以只坐得下一个食草生态型。** 果层现存量只有草层的
+0.37%（golden）到 0.07%（20k 步实测）。**先造第二个生态位，再谈第二个物种**——顺序反过来
+已经被 forage_pref 那次证否了（还付了永久 `trait_dim` 7→8 的代价）。
 
-1. **看 `20260725-carrion` 6 种子结果**：carn_frac ON>OFF？min 抬高（抗灭绝）？渴死不恶化？
-   → 填 `multispecies_feasibility.md` §7、判正/负、决定是否默认开或加 scavenge trait。
-2. 用户 #4（多性状）、#5（种间合作脚手架=共享报警场）**尚未动手**——研究已在
-   `multispecies_ecology.md §5`/`multispecies_feasibility.md §5`，是下一批实现候选。
+## 非目标（本轮明确不做）
+
+- 不动 `in_dim`（会作废全部演化脑）。
+- 不为了让实验「成立」而放宽 `scripts/golden.json` 的 band。
+- 不擅自把会改默认生态的机制转为默认开——那是价值决策，写进 HANDOFF PENDING 交用户。
 
 ## 纪律
 
 - 并行跑实验**最多 6 个并发**（12 个会 GPU OOM）。
-- ecology 改动 6 种子、默认关新机制保 golden bit-exact、跑实验前先提交。
-- push 用 `GIT_SSH_COMMAND="ssh -o BatchMode=yes" git push`（ssh-agent 死了）。
+- 生态改动 6 配对种子起；空间结论必须交叉地形种子（否则伪重复）。
+- 跑实验前先 commit（脏树上跑的 provenance 对不上任何 commit）。
+- 判决派 `result-analyst`，主控不自己读十几个 run 的日志。
+- 提交身份 `Asada-Sinon <weibinkong.research@gmail.com>`（已设 repo-local）；
+  push 用 `GIT_SSH_COMMAND="ssh -o BatchMode=yes" git push`。
