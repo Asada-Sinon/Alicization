@@ -106,3 +106,20 @@
   分钟），本项目预算下不可用。④性状/基因类指标 ICC 高（`forage_pref_std` 0.547、`carn_attack`
   0.389），比种群比例类结论站得稳——别一竿子打翻所有旧结论，按「效应量/噪声」比值逐条重估。
 - 来源: Session 2026-08-03，详见 `docs/run_to_run_variance.md`
+
+### [LEARN:env] 测试套件是**主机 CPU 编译瓶颈**，不是 GPU——终端刷屏能把 `--full` 拖慢 2.7 倍
+- 现象: `check.py --full` 从整夜稳定的 233–250s 突然变成 **635.9s**，且冷却后重跑仍是
+  **635.8s**（逐秒复现，不是瞬态）。测试集在这两次之间**一个字都没改**。
+- 我最初的两个猜测都错了: ①「是我新加的 5 个测试拖慢的」——`pytest --durations` 显示
+  前 7 名全是**既有**测试（各约 30s），新增的排第 8（21s）；②「笔记本 GPU 满载一夜后热降频」
+  ——冷却到 51°C、`nvidia-smi -q -d PERFORMANCE` 显示所有 throttle reason 均为 Not Active，
+  重跑仍是 635.8s。
+- 原因: **终端模拟器 `ghostty` 占着 95.2% CPU、load average 5.92。** 整夜把几万行 sweep 日志
+  刷进终端，把它刷成了一个跑满一核的进程。而 **XLA 是在主机 CPU 上编译的**——套件里最慢的
+  那批测试（`test_determinism`、各种 `*_default_is_truly_off`）耗时几乎全是 jit 编译，
+  不是 GPU 算力。主机 CPU 被抢，编译就慢，整套跟着翻倍。
+- 对策: 套件变慢时**先看 `uptime` 和 `ps --sort=-pcpu`，再怀疑代码**。`nvidia-smi` 一切正常
+  ≠ 没有性能问题，因为这个套件根本不是 GPU-bound。长 sweep 的输出一律重定向到文件
+  （`> outputs/.../x.log 2>&1`，本项目已经这么做），**不要让它流经终端**；诊断脚本的输出也
+  尽量 `tail`/`grep` 而不是整段打印。
+- 来源: Session 2026-08-03
