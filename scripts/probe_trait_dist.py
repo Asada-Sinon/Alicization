@@ -205,12 +205,30 @@ def main(steps: int = 20000, seed: int = 0, trait: str = "forage_pref",
           f"trait={trait}  lineage={lineage}")
 
     state, key, _step, scan_fn, _terrain = new_world(cfg)
+    # Carry the run's Metrics too, so one run answers both "what shape is the gene
+    # distribution" and "did the guardrails hold". They are asked together in every
+    # verdict, and running the world twice to get them separately would double the
+    # GPU bill for nothing. Death counts are per-step and must be SUMMED over the
+    # whole run (not sampled at a chunk boundary), same as run_headless does.
+    CAUSES = ("predation", "starvation", "thirst", "senescence")
+    toll = {f"death_{c}": 0.0 for c in CAUSES}
+    row: dict = {}
+    pops: list[float] = []
     done = 0
     while done < steps:
         take = min(chunk, steps - done)
-        state, key, _ms = scan_fn(state, key, take)
+        state, key, ms = scan_fn(state, key, take)
+        d = ms._asdict()
+        for c in CAUSES:
+            toll[f"death_{c}"] += float(np.asarray(d[f"death_{c}"]).sum())
+        row = {k: float(np.asarray(v)[-1]) for k, v in d.items()}
+        pops.append(row["population"])
         done += take
     jax.block_until_ready(state.genome)
+    total_deaths = max(sum(toll.values()), 1.0)
+    guards = {f"death_{c}_frac": toll[f"death_{c}"] / total_deaths for c in CAUSES}
+    guards["min_pop"] = float(np.min(pops)) if pops else float("nan")
+    guards["total_deaths"] = total_deaths
 
     decode = getattr(state_mod, TRAITS[trait])
     values = np.asarray(decode(state.genome, cfg))
@@ -233,6 +251,7 @@ def main(steps: int = 20000, seed: int = 0, trait: str = "forage_pref",
         print("!! too few carriers for a shape test")
         print("JSON " + json.dumps({"seed": seed, "steps": steps, "trait": trait,
                                     "lineage": lineage, "n": len(x),
+                                    **row, **guards,
                                     "overrides": overrides or {}}))
         return
 
@@ -256,6 +275,15 @@ def main(steps: int = 20000, seed: int = 0, trait: str = "forage_pref",
         np.save(dump, x)
         print(f"  raw carrier values -> {dump}  ({len(x)} values)")
 
+    print(f"  guardrails: population={row.get('population', float('nan')):.0f}  "
+          f"carn_frac={row.get('carnivore_frac', float('nan')):.4f}  "
+          f"frugivory={row.get('frugivory_frac', float('nan')):.4f}  "
+          f"thirst_frac={guards['death_thirst_frac']:.4f}  "
+          f"min_pop={guards['min_pop']:.0f}")
+
+    # `row`/`guards` are spread in so one sweep line carries both the shape stats and
+    # the guardrails the criterion also asks for. Trait-specific keys go first so a
+    # future Metrics field can never silently shadow one of them.
     print("JSON " + json.dumps({
         "seed": seed, "steps": steps, "trait": trait, "lineage": lineage,
         "n": int(len(x)), "mean": float(x.mean()), "sd": float(x.std()),
@@ -263,6 +291,7 @@ def main(steps: int = 20000, seed: int = 0, trait: str = "forage_pref",
         "blrt_lr": test["lr"], "blrt_lr_per_n": test["lr_per_n"],
         "blrt_p": test["p"], "blrt_n_boot": test["n_boot"],
         "hist": [int(h) for h in hist], "hist_lo": 0.0, "hist_hi": 1.0,
+        **row, **guards,
         "overrides": overrides or {}}))
     print("\n[PROBE -- one seed decides nothing (conventions.md §5). Compare arms "
           "over the 6-seed paired protocol.]")
