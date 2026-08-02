@@ -20,3 +20,15 @@
 原子重排，不是创始者差异 —— 脚本 §10 会把这一点核出来。
 
 重跑：`XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python explorations/20260803-partition/analyze_p3.py`
+
+## analyze_curve.py — P4「窄分化窗口」收口 (五点剂量-响应)
+
+回答什么：P3 只测了 0.0/0.5/1.0，看不到比自身间距更窄的窗口。本轮补 `forage_tradeoff`
+= 0.125 (L) 与 0.25 (N)，判据是 `sd(L)` 或 `sd(N)` 是否**高于**中性漂变对照 `sd(P,0.0)`。
+
+读什么：同目录 90 个 log（`{P_tradeoff0,L_tradeoff0125,N_tradeoff025,M_tradeoff05,
+Q_tradeoff1}_s{0..5}_r{1..3}.log`，每个第 12 行一条 `JSON {...}`）+ `provenance.txt`
+（三段追加；P/Q=9296fd7、M=7937499、L/N=c1f9527，三者间 `underworld/`+`scripts/` 无 diff）。
+
+重跑：`XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python explorations/20260803-partition/analyze_curve.py`
+（§10 口径敏感性与 §11 MDE 是本脚本相对 analyze_p3.py 新增的两节。）
