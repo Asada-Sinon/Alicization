@@ -29,6 +29,28 @@ test against ANY departure from unimodality; the alternative we actually care ab
 is specifically "two groups", which is what a two-component mixture models. Reported
 alongside is the bimodality coefficient, a cheap closed-form descriptive.
 
+## The absolute p-value here is INVALID. Use the paired between-arm comparison.
+
+Every shape test above assumes iid draws. An evolved population is not a sample --
+it is a genealogy, and kin share gene values, so the distribution is lumpy with
+family clusters whatever the ecology is doing. The effective sample size is the
+number of independent lineages, not the number of agents, and with n~2000 agents the
+bootstrap null (which resamples iid) is far too narrow.
+
+Measured, not argued (2000 steps, seed 0, herb carriers):
+
+    forage_tradeoff=0.5 (gene ACTIVE)   LR=212.8  n=2107  p=0.0200 (floor)
+    forage_tradeoff=0.0 (gene INERT)    LR= 65.9  n=1666  p=0.0200 (floor)
+
+The neutral control -- where the gene is compile-time disconnected from the world and
+can do literally nothing -- also rejects unimodality at the floor. So `blrt_p` is
+reported for completeness but must never be read as "this arm is bimodal".
+
+What IS usable is `blrt_lr_per_n` compared BETWEEN PAIRED ARMS: kin structure inflates
+both arms, so the difference still carries signal (0.101 vs 0.040 above). LR is divided
+by n because 2*(ll2-ll1) grows with sample size and the arms have different carrier
+counts -- comparing raw LR across arms would be comparing population sizes.
+
 THIS IS A MEASUREMENT TOOL, not a conclusion. One seed decides nothing here either
 (conventions.md §5) -- run it over the 6-seed paired protocol and compare arms.
 """
@@ -150,6 +172,10 @@ def blrt_two_components(x: np.ndarray, n_boot: int = 199, seed: int = 0) -> dict
 
     p is the standard (1 + #{boot >= observed}) / (n_boot + 1) so it can never be
     exactly 0 -- with n_boot=199 the floor is p=0.005.
+
+    READ THE MODULE DOCSTRING BEFORE USING `p`: on an evolved population it is
+    invalid (kin structure breaks iid and the inert-gene control also floors it).
+    `lr_per_n` compared between paired arms is the statistic that carries signal.
     """
     rng = np.random.default_rng(seed)
     ll1 = _normal_loglik(x)
@@ -162,7 +188,8 @@ def blrt_two_components(x: np.ndarray, n_boot: int = 199, seed: int = 0) -> dict
         xb = rng.normal(mu, max(sd, 1e-12), size=n)
         lrb = 2.0 * (_gmm2_loglik(xb, rng=rng) - _normal_loglik(xb))
         ge += int(lrb >= lr)
-    return {"lr": float(lr), "p": (1.0 + ge) / (n_boot + 1.0),
+    return {"lr": float(lr), "lr_per_n": float(lr) / max(len(x), 1),
+            "p": (1.0 + ge) / (n_boot + 1.0),
             "n_boot": n_boot, "ll1": ll1, "ll2": ll2}
 
 
@@ -217,8 +244,11 @@ def main(steps: int = 20000, seed: int = 0, trait: str = "forage_pref",
     print(f"  mean={x.mean():.4f}  sd={x.std():.4f}  "
           f"min={x.min():.4f}  max={x.max():.4f}")
     print(f"  bimodality coefficient = {bc:.4f}   (>0.555 leans bimodal)")
-    print(f"  BLRT 1-vs-2 components: LR={test['lr']:.2f}  p={test['p']:.4f}  "
-          f"(n_boot={test['n_boot']}, floor p={1.0/(n_boot+1):.4f})")
+    print(f"  BLRT 1-vs-2 components: LR={test['lr']:.2f}  "
+          f"LR/n={test['lr_per_n']:.5f}   <-- COMPARE THIS BETWEEN PAIRED ARMS")
+    print(f"  blrt_p={test['p']:.4f} (n_boot={test['n_boot']}, floor "
+          f"{1.0/(n_boot+1):.4f})  !! INVALID as an absolute test: kin structure "
+          f"breaks iid; the inert-gene control floors it too. See module docstring.")
     print("  histogram (40 bins over [0,1]):")
     print("   " + " ".join(str(int(h)) for h in hist))
 
@@ -230,7 +260,8 @@ def main(steps: int = 20000, seed: int = 0, trait: str = "forage_pref",
         "seed": seed, "steps": steps, "trait": trait, "lineage": lineage,
         "n": int(len(x)), "mean": float(x.mean()), "sd": float(x.std()),
         "bimodality_coefficient": float(bc),
-        "blrt_lr": test["lr"], "blrt_p": test["p"], "blrt_n_boot": test["n_boot"],
+        "blrt_lr": test["lr"], "blrt_lr_per_n": test["lr_per_n"],
+        "blrt_p": test["p"], "blrt_n_boot": test["n_boot"],
         "hist": [int(h) for h in hist], "hist_lo": 0.0, "hist_hi": 1.0,
         "overrides": overrides or {}}))
     print("\n[PROBE -- one seed decides nothing (conventions.md §5). Compare arms "
