@@ -2,11 +2,16 @@
 
 Usage:
     .venv/bin/python scripts/run_live.py [--host 0.0.0.0] [--port 8000] [--no-open]
+                                         [--set FIELD=VALUE ...]
+
+`--set` takes the same ablation arms as `run_headless.py`, so a config can be
+*looked at* and not only measured -- see `server.app._config_from_env`.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 import webbrowser
@@ -21,7 +26,15 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--set", action="append", metavar="FIELD=VALUE", dest="sets",
+                    help="override a Config field, e.g. --set fruit_energy=4.0. "
+                         "Repeatable. Same arms as run_headless.py")
     args = ap.parse_args()
+
+    # The sim is built at `server.app` import time, so the arm has to be in place
+    # before that import below -- hence an env var rather than a function argument.
+    if args.sets:
+        os.environ["UNDERWORLD_SET"] = ";".join(args.sets)
 
     if not args.no_open:
         url = f"http://localhost:{args.port}"

@@ -11,7 +11,9 @@ Run:  .venv/bin/python scripts/run_live.py
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -24,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 
 from server import protocol
 from underworld import Config, new_world
+from underworld.config import parse_overrides
 from underworld.state import armor_of, size_of, spike_of
 
 
@@ -170,7 +173,27 @@ class Simulation:
             self.selected = sid if sid >= 0 else None
 
 
-sim = Simulation(Config())
+def _config_from_env() -> Config:
+    """Build the dashboard's config, applying any `--set` arm passed through the
+    environment as `UNDERWORLD_SET` (semicolon-separated `field=value` pairs).
+
+    The dashboard is constructed at import time, so there is no argv to read by the
+    time this runs -- `scripts/run_live.py` parses `--set` and puts it here before
+    importing this module. Without this the dashboard could only ever show the
+    default world, which is the wrong constraint for a project whose rule is that
+    anything visible must be *looked at* (`docs/conventions.md` §10): every
+    interesting arm here is an ablation, and an arm you cannot render never gets
+    its shader and spatial behaviour checked by eye.
+    """
+    raw = os.environ.get("UNDERWORLD_SET", "").strip()
+    if not raw:
+        return Config()
+    overrides = parse_overrides([p for p in raw.split(";") if p.strip()])
+    print(f"[dashboard] config overrides: {overrides}")
+    return dataclasses.replace(Config(), **overrides)
+
+
+sim = Simulation(_config_from_env())
 
 
 @asynccontextmanager

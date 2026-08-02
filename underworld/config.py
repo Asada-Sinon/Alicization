@@ -982,3 +982,32 @@ class Config:
     @property
     def genome_size(self) -> int:
         return self.brain_params + self.trait_dim
+
+
+def parse_overrides(pairs) -> dict:
+    """Turn `--set name=value` strings into typed kwargs for `dataclasses.replace`.
+
+    Ablations are how most claims here get falsified ("is the fruit layer doing
+    anything?" is answered by a `fruit_max=0` arm, not by reading the code), so
+    the control arm has to be reachable without editing this file -- editing it
+    would make the two arms two different working trees. Values are coerced to
+    the field's declared type so `--set fruit_max=0` gives a float and
+    `--set n_init=200` an int, not strings that silently poison the jit.
+
+    Lives here rather than in `scripts/run_headless.py` (its original home) so that
+    everything which can instantiate a world can also accept an ablation arm --
+    the headless runner, the probes, and the live dashboard. A config you can run
+    but cannot *look at* is a config whose shader and spatial behaviour never get
+    the eyes-on check `docs/conventions.md` §10 requires.
+    """
+    types = {f.name: f.type for f in dataclasses.fields(Config)}
+    out = {}
+    for p in pairs or ():
+        name, _, raw = p.partition("=")
+        if name not in types:
+            raise SystemExit(f"--set: no Config field named {name!r}")
+        t = types[name]
+        # Annotations may be strings under `from __future__ import annotations`.
+        t = {"int": int, "float": float, "bool": bool}.get(t, t) if isinstance(t, str) else t
+        out[name] = (raw not in ("0", "False", "false")) if t is bool else t(raw)
+    return out

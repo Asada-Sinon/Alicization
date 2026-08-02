@@ -22,29 +22,13 @@ import jax
 import numpy as np
 
 from underworld import Config, new_world
+from underworld import config as config_mod
 
 
-def parse_overrides(pairs) -> dict:
-    """Turn `--set name=value` strings into typed kwargs for `dataclasses.replace`.
-
-    Ablations are how most claims here get falsified ("is the fruit layer doing
-    anything?" is answered by a `fruit_max=0` arm, not by reading the code), so
-    the control arm has to be reachable without editing `config.py` -- editing it
-    would make the two arms two different working trees. Values are coerced to
-    the field's declared type so `--set fruit_max=0` gives a float and
-    `--set n_init=200` an int, not strings that silently poison the jit.
-    """
-    types = {f.name: f.type for f in dataclasses.fields(Config)}
-    out = {}
-    for p in pairs or ():
-        name, _, raw = p.partition("=")
-        if name not in types:
-            raise SystemExit(f"--set: no Config field named {name!r}")
-        t = types[name]
-        # Annotations may be strings under `from __future__ import annotations`.
-        t = {"int": int, "float": float, "bool": bool}.get(t, t) if isinstance(t, str) else t
-        out[name] = (raw not in ("0", "False", "false")) if t is bool else t(raw)
-    return out
+# Moved to `underworld.config` so the probes and the live dashboard can take the
+# same `--set` arms; re-exported here because several callers import it from this
+# module by its original path.
+parse_overrides = config_mod.parse_overrides
 
 
 def main(total_steps: int = 4000, chunk: int = 200, seed: int = 0,
