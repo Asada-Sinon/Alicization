@@ -148,8 +148,15 @@ def eat_fruit(state: WorldState, cfg: Config):
     -- same per-cell demand pool, same fair share, same herbivory taper -- but on
     a field that is scarce, concentrated and slow to come back.
 
-    Returns (energy, fruit, fruit_gain, water_gain). Fruit carries water at the
-    same rate as grass; it is plant tissue either way.
+    Returns (energy, fruit, fruit_gain, water_gain). Fruit's water rides on its own
+    `fruit_water_frac` rather than sharing grass's constant, because the two layers
+    are not commensurable: grass energy IS its biomass (no energy multiplier), so
+    grass water per calorie is `forage_water_frac`, whereas fruit water per calorie
+    is `fruit_water_frac / (fruit_energy * eat_efficiency)`. Sharing one constant
+    silently makes a high-energy fruit layer drier per calorie -- which is both
+    backwards ecologically (real fruit is 80-90% water) and what broke the thirst
+    guardrail in docs/multispecies_program.md §7.5. The defaults are equal, so this
+    is bit-exact until an arm separates them.
     """
     cell = pos_to_cell(state.pos, cfg)
     herbivory = _herbivory(state.diet, cfg)
@@ -171,7 +178,7 @@ def eat_fruit(state: WorldState, cfg: Config):
 
     energy = state.energy + gain
     fruit = state.fruit - removed_per_cell
-    return energy, fruit, gain, taken * cfg.forage_water_frac
+    return energy, fruit, gain, taken * cfg.fruit_water_frac
 
 
 def scavenge(state: WorldState, cfg: Config):

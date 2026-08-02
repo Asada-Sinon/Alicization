@@ -552,6 +552,30 @@ class Config:
     fruit_patch_threshold: float = 0.55  # keeps roughly the top ~20% of the sine
     #                                   product; with forest**2 on top this lands
     #                                   fruit on a small percentage of the map
+    fruit_water_frac: float = 0.10    # water drawn per unit of fruit BIOMASS eaten.
+    #                                   Deliberately equal to forage_water_frac's
+    #                                   default, so the default world is bit-exact
+    #                                   the version where fruit shared that constant
+    #                                   -- this field exists to let the two layers
+    #                                   come apart, not to change anything by itself.
+    #                                   Why they must be able to come apart
+    #                                   (docs/multispecies_program.md §7.5): grass
+    #                                   water rides on `gain` (== biomass, since
+    #                                   grass has no energy multiplier) while fruit
+    #                                   water rides on `taken` (biomass) but fruit
+    #                                   `gain` is biomass * fruit_energy. So fruit
+    #                                   delivers 0.10/fruit_energy water per calorie
+    #                                   against grass's 0.10 -- at fruit_energy=4 a
+    #                                   frugivore gets a QUARTER the drinking
+    #                                   subsidy per calorie, and moving a fifth of
+    #                                   the diet to fruit broke the thirst guardrail
+    #                                   on 3 of 6 seeds. Water-neutral dose solves
+    #                                   fruit_water_frac = forage_water_frac *
+    #                                   fruit_energy * eat_efficiency (0.40 at
+    #                                   fruit_energy=4). Real fruit is 80-90% water
+    #                                   against forage grass's 60-80%, so even
+    #                                   water-neutral is conservative -- see the
+    #                                   preformed-water section of docs/biology.md.
 
     # --- carrion: a scavenging trophic pathway (docs/multispecies_feasibility.md §4).
     # A per-cell field (like plant/fruit/fear/trample) that receives a deposit when an

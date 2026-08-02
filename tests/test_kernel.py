@@ -1949,3 +1949,34 @@ def test_shape_test_lr_is_non_negative_and_bounded_variance():
     assert np.isfinite(out["lr"]), "LR went non-finite (variance collapse)"
     assert out["lr"] >= -1e-6, f"two components fitted worse than one: {out['lr']}"
     assert np.isfinite(out["ll2"]) and out["ll2"] >= out["ll1"] - 1e-6
+
+
+def test_fruit_water_defaults_bit_exact_and_scales_when_separated():
+    """`fruit_water_frac` exists to let the fruit layer's water come apart from
+    grass's, and it must do nothing at all until an arm separates them.
+
+    Two claims: (a) at the default it equals `forage_water_frac`, so `eat_fruit`
+    returns exactly what it did when the two shared one constant -- no silent world
+    change rides in with the new field; (b) raising it scales fruit's water gain
+    proportionally and touches nothing else the call returns. Guards the fix in
+    docs/multispecies_program.md §7.5, where a high `fruit_energy` made fruit drier
+    per calorie than grass and broke the thirst guardrail.
+    """
+    cfg = tiny_cfg()
+    assert cfg.fruit_water_frac == cfg.forage_water_frac, \
+        "the defaults must be equal or the new field is not bit-exact"
+
+    _s, _k, _sf, _sc, terrain = new_world(cfg)
+    state = init_state(cfg, jax.random.PRNGKey(4), terrain)
+    # Put fruit under everyone so the layer is actually eaten.
+    state = state._replace(fruit=terrain.fruit_capacity)
+    e0, f0, g0, w0 = dynamics.eat_fruit(state, cfg)
+
+    wet = tiny_cfg(fruit_water_frac=0.4)
+    e1, f1, g1, w1 = dynamics.eat_fruit(state, wet)
+    assert float(jnp.sum(w0)) > 0.0, "nobody ate fruit -- the test is vacuous"
+    assert np.allclose(np.asarray(e0), np.asarray(e1)), "energy must not move"
+    assert np.allclose(np.asarray(f0), np.asarray(f1)), "the field must not move"
+    assert np.allclose(np.asarray(g0), np.asarray(g1)), "the gain must not move"
+    assert np.allclose(np.asarray(w1), 4.0 * np.asarray(w0), rtol=1e-5), \
+        "water must scale exactly with fruit_water_frac"
