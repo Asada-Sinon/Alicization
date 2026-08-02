@@ -1908,3 +1908,44 @@ def test_intake_flux_is_zero_for_a_switched_off_fruit_layer():
     frac = np.asarray(ms.frugivory_frac)
     assert np.all(np.isfinite(frac)), "frugivory_frac went non-finite (0/0 guard failed)"
     assert float(frac.sum()) == 0.0
+
+
+def test_shape_test_separates_unimodal_from_bimodal():
+    """The bimodality machinery in `scripts/probe_trait_dist.py` is validated against
+    synthetic data with known ground truth, because it is the piece that decides the
+    resource-partitioning verdict (docs/multispecies_program.md S2) and a subtly wrong
+    shape test returns a plausible number rather than an error.
+
+    One draw from a Gaussian must NOT be called bimodal; two well-separated Gaussians
+    must be. n_boot is small here to keep the suite fast -- p floors at 1/(n_boot+1).
+    """
+    from scripts.probe_trait_dist import blrt_two_components, bimodality_coefficient
+    rng = np.random.default_rng(7)
+    uni = rng.normal(0.5, 0.08, size=600)
+    bi = np.concatenate([rng.normal(0.25, 0.05, size=300),
+                         rng.normal(0.75, 0.05, size=300)])
+
+    p_uni = blrt_two_components(uni, n_boot=49, seed=1)["p"]
+    p_bi = blrt_two_components(bi, n_boot=49, seed=1)["p"]
+    assert p_uni > 0.05, f"a single Gaussian was called bimodal (p={p_uni})"
+    assert p_bi <= 0.05, f"two separated Gaussians were not detected (p={p_bi})"
+
+    bc_uni = bimodality_coefficient(uni)
+    bc_bi = bimodality_coefficient(bi)
+    assert bc_uni < 0.555, f"unimodal BC should sit below the uniform value: {bc_uni}"
+    assert bc_bi > 0.555, f"bimodal BC should sit above the uniform value: {bc_bi}"
+
+
+def test_shape_test_lr_is_non_negative_and_bounded_variance():
+    """Two guards on the EM fit: adding a second component can never *lower* the
+    likelihood (so LR >= 0, modulo local optima), and a sample with a duplicated
+    point must not send the mixture likelihood to +inf via a collapsing component --
+    that is what the variance floor is for, and without it the LR statistic is
+    meaningless rather than merely noisy."""
+    from scripts.probe_trait_dist import blrt_two_components
+    rng = np.random.default_rng(3)
+    x = np.concatenate([rng.normal(0.4, 0.06, size=200), np.full(40, 0.4)])
+    out = blrt_two_components(x, n_boot=19, seed=2)
+    assert np.isfinite(out["lr"]), "LR went non-finite (variance collapse)"
+    assert out["lr"] >= -1e-6, f"two components fitted worse than one: {out['lr']}"
+    assert np.isfinite(out["ll2"]) and out["ll2"] >= out["ll1"] - 1e-6
