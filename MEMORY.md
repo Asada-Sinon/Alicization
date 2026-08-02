@@ -77,3 +77,16 @@
   再比——`2(ll2−ll1)` 随样本量线性增长，两臂种群大小不同时直接比 LR 等于在比种群大小。
   同理适用于任何「拿全部存活个体当独立观测」的检验（性状相关、G 矩阵、HWE）。
 - 来源: Session 2026-08-02
+
+### [LEARN:tooling] Bash 工具跑的是 zsh，未加引号的变量不做词分割——多参数臂会被整串塞给 argparse
+- 现象: 探针 6 个臂里 5 个秒退，日志只有 `run_headless.py: error: unrecognized arguments:
+  --set fruit_regrow_baseline=0.25 --set fruit_energy=4.0 --set fruit_water_frac=0.40`。
+  三个 `--set` 对被当成**一个**参数报出来，而同一行末尾单独写的第四个 `--set` 反而被识别。
+- 原因: 本环境 `Shell: zsh`。**zsh 默认不对未加引号的参数展开做词分割**（这是它与 bash 的
+  经典差异）。把公共臂放进 `D="--set a=1 --set b=2"` 再写 `run x $D` 时，bash 会拆成 4 个词，
+  zsh 只给 1 个词，argparse 收到一个既不是选项也不是已知位置参数的长字符串 → unrecognized。
+- 对策: 多参数的 sweep **一律写成 `bash <script>.sh` 执行的脚本文件**，并用**数组**传公共臂
+  （`D=(--set a=1 --set b=2)`，调用写 `"${D[@]}"`）。别在 Bash 工具里直接写依赖词分割的内联
+  循环。附带好处：脚本文件本身就是可复跑的 provenance。
+  （之前几次 sweep 没踩到，是因为它们要么把参数写全、要么已经走 `bash script.sh`。）
+- 来源: Session 2026-08-03
