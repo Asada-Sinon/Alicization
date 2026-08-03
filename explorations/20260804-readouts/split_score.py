@@ -65,8 +65,14 @@ def split_score(n, ctr, smooth=1):
         return 0.0, float("nan")
     p = p / s
     if smooth:
+        # **边界要用边缘复制，不能补零。** `np.convolve(mode="same")` 在两端补 0，
+        # 于是**落在边界箱的峰会被平滑抹掉**：实测 `[0.332, 0.035, 0, …]` 平滑后
+        # `p[0]=p[1]=0.122`，`p[0] > p[1]` 变成假，索引 0 就不再是局部极大，
+        # 整个分裂读成 0。R13 的 120 个检查点里有 10 个这样的假阴，
+        # 最大的一个 `low_mass=0.3671`（`wn1_s6` cp0，且 `dip_ratio=0.013` ⇒ 中间带确实空）
+        # ——**它带着全场第二大的果专精质量被入组条件踢掉了**。
         k = np.ones(2 * smooth + 1) / (2 * smooth + 1)
-        p = np.convolve(p, k, mode="same")
+        p = np.convolve(np.pad(p, smooth, mode="edge"), k, mode="valid")
         p = p / max(p.sum(), 1e-12)
     # 局部极大：严格高于两个邻居（端点用单侧）
     loc = [i for i in range(len(p))
@@ -83,6 +89,27 @@ def split_score(n, ctr, smooth=1):
         return 0.0, float("nan")
     mL, mR = p[:v].sum(), p[v:].sum()
     return float(min(mL, mR) * (1.0 - p[v] / lo)), float(ctr[v])
+
+
+def retained(n, ctr, mass_thresh=0.03, dip_thresh=0.5):
+    """留存判据：**质量 + 缺口**，两项各自可解释。**这才是该当判据的那个量。**
+
+    `split_score` 位置无关，代价是它不问「谷在哪、少数侧是哪一侧」。R13 的 120 个检查点里
+    有 **8 个「假阳」**：谷落在 0.57–0.62，那**确实是双峰**（0.42 vs 0.75），
+    只是**不是「果专精 vs 草专精」那一种**——是统计量与生物学问题不匹配，不是统计量错。
+    最坏的 `wn2_s5` cp1 读 `split_score=0.4101` 而 `low_mass=0.0000`。
+
+    所以判「果专精簇还在不在」要用直接问它的量：
+
+        retained = (low_mass > θ) AND (dip_ratio < φ)
+
+    `low_mass` 管「少数侧有没有质量」，`dip_ratio` 管「中间有没有缺口」。
+    在 R13 的 120 个检查点上，**θ ∈ {0.02,0.03,0.05} × φ ∈ {0.3,0.5} 的每一组
+    都给出 0 假阳、0 假阴**（对照 `split_score` 的 8 假阳 + 10 假阴）。
+    """
+    p = np.asarray(n, float)
+    p = p / max(p.sum(), 1.0)
+    return bool(p[ctr < 0.35].sum() > mass_thresh and dip_ratio(n, ctr) < dip_thresh)
 
 
 def dip_ratio(n, ctr):
