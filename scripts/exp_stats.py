@@ -129,25 +129,38 @@ class RunSet:
         return cls(records, sources, arms, seeds, reps, problems)
 
     # ---------------- 口径 1：格均值 ----------------
-    def cell(self, arm: str, seed: int, metric: str) -> tuple[float, float, np.ndarray]:
+    @staticmethod
+    def _value(rec: dict, metric: str | Callable[[dict], float]) -> float:
+        """取一个 run 的指标值。`metric` 可以是字段名，也可以是 `rec -> float` 的函数。
+
+        用函数形式表达**派生量**（例如「实测 − 同 run 内的零模型」这种同 run 内的差），
+        这样 `cell` / `pooled_within_sd` / `pair_noise` 对派生量一视同仁——派生量的噪声
+        必须在派生之后估，先分别估再相减会漏掉两者的相关性。
+        """
+        return float(metric(rec)) if callable(metric) else float(rec[metric])
+
+    def cell(self, arm: str, seed: int,
+             metric: str | Callable[[dict], float]) -> tuple[float, float, np.ndarray]:
         """一个格（同臂同种子的 `r` 次重复）的 `(均值, 格内 SD, 原始值)`。"""
-        v = np.array([self.records[(arm, seed, r)][metric] for r in self.reps], float)
+        v = np.array([self._value(self.records[(arm, seed, r)], metric) for r in self.reps], float)
         sd = float(v.std(ddof=1)) if len(v) > 1 else float("nan")
         return float(v.mean()), sd, v
 
-    def cell_means(self, arm: str, metric: str) -> np.ndarray:
+    def cell_means(self, arm: str, metric: str | Callable[[dict], float]) -> np.ndarray:
         """一个臂的 `s` 个格均值——**这才是配对检验的样本**（口径 1）。"""
         return np.array([self.cell(arm, s, metric)[0] for s in self.seeds], float)
 
-    def raw(self, arm: str, metric: str) -> np.ndarray:
+    def raw(self, arm: str, metric: str | Callable[[dict], float]) -> np.ndarray:
         """一个臂全部 `s×r` 个 run 的原始值。只用于描述性统计与极值追溯——
         **拿它做检验就是伪重复**（重复是同种子复跑）。"""
         return np.array(
-            [self.records[(arm, s, r)][metric] for s in self.seeds for r in self.reps], float
+            [self._value(self.records[(arm, s, r)], metric)
+             for s in self.seeds for r in self.reps], float
         )
 
     # ---------------- 口径 2/3：噪声自估 ----------------
-    def pooled_within_sd(self, metric: str, arms: Sequence[str] | None = None) -> float:
+    def pooled_within_sd(self, metric: str | Callable[[dict], float],
+                         arms: Sequence[str] | None = None) -> float:
         """`σ̂_W`：跨格池化的**格内**（同种子复跑）SD，即本世界的复现噪声。
 
         池化用平方平均（等格大小下即合并方差的平方根）。`arms=None` 时用全部臂；
@@ -157,7 +170,8 @@ class RunSet:
         w = np.array([self.cell(a, s, metric)[1] for a in arms for s in self.seeds], float)
         return float(np.sqrt((w ** 2).mean()))
 
-    def pair_noise(self, metric: str, arms: Sequence[str] | None = None) -> float:
+    def pair_noise(self, metric: str | Callable[[dict], float],
+                   arms: Sequence[str] | None = None) -> float:
         """配对差的噪声 `√2·σ̂_W/√r`（口径 2 的分母，也是口径 3 的护栏尺）。
 
         `√2` 来自两臂各贡献一份独立噪声；`/√r` 来自格均值已经把 `r` 次重复平均掉了。
@@ -165,6 +179,27 @@ class RunSet:
         零效应也会经常撞线。
         """
         return self.pooled_within_sd(metric, arms) * math.sqrt(2) / math.sqrt(len(self.reps))
+
+    def icc(self, metric: str | Callable[[dict], float],
+            arm: str) -> tuple[float, float, float]:
+        """单向随机效应方差分解，返回 `(ICC, σ_between, σ_within)`。
+
+        `σ_between` 是**创始者**方差分量（换种子带来的），`σ_within` 是同种子复跑的混沌
+        噪声。`ICC = σ²_b / (σ²_b + σ²_w)`。
+
+        为什么每轮都值得看它：**ICC 决定了配对买到了什么**——配对把差值方差降低
+        `1/(1−ICC)` 倍，所以 ICC≈0 的指标配对完全无用（`run_to_run_variance.md` §5.1
+        实测 `late_carn`/`death_thirst_frac`/`total_flux` 的 ICC 就是 0）。
+        矩估计可能给出负的 `σ²_b`，按惯例截到 0。
+        """
+        r = len(self.reps)
+        cells = [self.cell(arm, s, metric) for s in self.seeds]
+        ms_within = float(np.mean([c[1] ** 2 for c in cells]))
+        ms_between = r * float(np.var([c[0] for c in cells], ddof=1))
+        var_b = max(0.0, (ms_between - ms_within) / r)
+        var_w = ms_within
+        icc = var_b / (var_b + var_w) if (var_b + var_w) > 0 else float("nan")
+        return float(icc), float(math.sqrt(var_b)), float(math.sqrt(var_w))
 
     # ---------------- 载入自检 ----------------
     def overrides_diff(self) -> list[str]:
@@ -252,21 +287,17 @@ class PairedResult:
         return "\n".join(lines)
 
 
-def paired(
-    rs: RunSet,
+def _paired_core(
+    x: np.ndarray,
+    y: np.ndarray,
+    noise: float,
     metric: str,
+    label: str,
     arm_a: str,
     arm_b: str,
-    label: str | None = None,
-    noise_arms: Sequence[str] | None = None,
     rng: np.random.Generator | None = None,
 ) -> PairedResult:
-    """口径 1+2 的完整实现：格均值 → 配对 Wilcoxon → 效应量 → bootstrap CI → 效应/噪声比。
-
-    `arm_a - arm_b` 是报告的差值方向（一般 a=处理、b=对照）。`noise_arms` 指定拿哪些臂
-    自估 `σ̂_W`（默认全部臂）。
-    """
-    x, y = rs.cell_means(arm_a, metric), rs.cell_means(arm_b, metric)
+    """配对检验的向量级内核。`paired()` 与 `one_sample()` 都走这里，口径只实现一次。"""
     d = x - y
     W, p = wilcoxon(x, y, alternative="two-sided")
     lo, hi = bootstrap_ci(d, rng=rng)
@@ -274,10 +305,9 @@ def paired(
     dz = float(d.mean() / sd_d) if sd_d > 0 else float("nan")
     rk = rankdata(np.abs(d))
     r_rb = float((rk[d > 0].sum() - rk[d < 0].sum()) / (len(d) * (len(d) + 1) / 2))
-    noise = rs.pair_noise(metric, noise_arms)
     return PairedResult(
         metric=metric,
-        label=label if label is not None else f"{arm_a} vs {arm_b}",
+        label=label,
         arm_a=arm_a,
         arm_b=arm_b,
         mean_a=float(x.mean()),
@@ -294,6 +324,60 @@ def paired(
         noise=noise,
         ratio=float(d.mean() / noise) if noise > 0 else float("nan"),
         observed_sd=sd_d,
+    )
+
+
+def one_sample(
+    rs: RunSet,
+    metric: str | Callable[[dict], float],
+    arm: str,
+    mu: float = 0.0,
+    label: str | None = None,
+    metric_name: str | None = None,
+    rng: np.random.Generator | None = None,
+) -> PairedResult:
+    """单臂检验：`s` 个格均值对固定基准 `mu` 的符号秩检验。
+
+    用在**同一个 run 内部就有对照**的场合——例如空间指标与它自己的零模型之比
+    （比值对 `mu=1.0`），或实测减同 run 零模型的差（对 `mu=0.0`）。这时不存在第二个臂，
+    但口径 1（先取格均值）与口径 2（效应 ÷ 自估噪声）照样适用。
+
+    噪声就地估：`σ̂_W` 取该（可为派生量的）指标本身的格内散度，噪声 `= σ̂_W/√r`
+    ——**没有 `√2`**，因为只有一个臂在贡献噪声，基准 `mu` 是常数。
+    """
+    x = rs.cell_means(arm, metric)
+    noise = rs.pooled_within_sd(metric, [arm]) / math.sqrt(len(rs.reps))
+    name = metric_name or (metric if isinstance(metric, str) else "<derived>")
+    return _paired_core(
+        x, np.full_like(x, float(mu)), noise, name,
+        label if label is not None else f"{name} vs μ={mu}",
+        arm, f"μ={mu}", rng=rng,
+    )
+
+
+def paired(
+    rs: RunSet,
+    metric: str | Callable[[dict], float],
+    arm_a: str,
+    arm_b: str,
+    label: str | None = None,
+    noise_arms: Sequence[str] | None = None,
+    metric_name: str | None = None,
+    rng: np.random.Generator | None = None,
+) -> PairedResult:
+    """口径 1+2 的完整实现：格均值 → 配对 Wilcoxon → 效应量 → bootstrap CI → 效应/噪声比。
+
+    `arm_a - arm_b` 是报告的差值方向（一般 a=处理、b=对照）。`noise_arms` 指定拿哪些臂
+    自估 `σ̂_W`（默认全部臂）。
+    """
+    name = metric_name or (metric if isinstance(metric, str) else "<derived>")
+    return _paired_core(
+        rs.cell_means(arm_a, metric),
+        rs.cell_means(arm_b, metric),
+        rs.pair_noise(metric, noise_arms),
+        name,
+        label if label is not None else f"{arm_a} vs {arm_b}",
+        arm_a, arm_b, rng=rng,
     )
 
 

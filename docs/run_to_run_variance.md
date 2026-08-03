@@ -299,7 +299,7 @@ SE = σ_W · √( 2 / (s · r) )
 | 1 | `.claude/skills/exp/SKILL.md` | ✅ 第 2 步整节重写为 §2.1 协议 / §2.2 三条口径 / §2.3 其余四条；第 1 步判据模板加「护栏与容差」字段；第 4 步 sweep 示例改 12×2 + 并发上限 6 + `{arm}_s{seed}_r{rep}.log` 命名；第 5 步要求 result-analyst 走共享库；硬约束加 4b |
 | 2 | `CLAUDE.md` | ✅ 统计段重写，含三条口径与 `exp_stats.py` 指针 |
 | 3 | `docs/conventions.md` §5 | ✅ 重写为 §5「地板算术 + 为什么加种子不加重复」/ §5.1「原功效算术错在用了跨种子 SD」/ §5.2「每次判决必报三件事」；§9.1 末尾「尚未生效」改为「已生效」 |
-| 4 | `scripts/exp_stats.py` | ✅ 新建。`RunSet.load/cell_means/pooled_within_sd/pair_noise/overrides_diff`、`paired()→PairedResult`（含 `.ratio`/`.underpowered`/`.at_floor`/`.format()`）、`bootstrap_ci`、`mde_sign_consistent`、`power_paired_wilcoxon`、`required_seeds`、`wilcoxon_p_floor` |
+| 4 | `scripts/exp_stats.py` | ✅ 新建。`RunSet.load/cell_means/pooled_within_sd/pair_noise/icc/overrides_diff`、`paired()` 与 `one_sample()`→`PairedResult`（含 `.ratio`/`.underpowered`/`.at_floor`/`.format()`）、`bootstrap_ci`、`mde_sign_consistent`、`power_paired_wilcoxon`、`required_seeds`、`wilcoxon_p_floor`。指标可以是字段名，也可以是 `rec -> float` 的函数（用来表达**同 run 内的派生量**，例如「实测 − 同 run 零模型」——派生之后再估噪声才吃得到两者的相关性） |
 | 5 | `docs/TODO.md` | ✅ 硬约束一节改为新协议 |
 | + | 环路上的其余 agent/skill | ✅ `result-analyst.md`（§1–§4 重写，它才是真正下判决的那个）、`plan-critic.md`（P-3 检查项）、`claim-verifier.md`（区分新旧协议，不追溯判旧结论为假）、`plan/impl/validate/kick` 各一处 |
 
