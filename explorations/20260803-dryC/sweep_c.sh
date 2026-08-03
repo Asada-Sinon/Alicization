@@ -19,8 +19,10 @@ SCRIPT=explorations/20260803-overlapA/measure_overlap.py
 COMMON=(20000 --json)
 NICHE=(--set fruit_regrow_baseline=0.25 --set fruit_energy=4.0 --set fruit_water_frac=0.40
        --set regrow_baseline=0.010 --set plant_max=2.0)
-# w=0 那一臂不跑：它就是 A 的 niche 臂，24 个 run 已经在 outputs/20260803-overlapA/ 里。
-WEIGHTS=(0.25 0.5 0.75 1.0)
+# w=0 也跑 3 个：不直接引用 A 的 niche 臂，因为 death_thirst_frac 是 A 跑完之后才加进
+# measure_overlap.py 的，A 的日志里没这个字段；而且像对像（同脚本版本、同种子、同重复数）
+# 比省 3 个 run 值钱。A 的 niche 臂仍留作交叉核对。
+WEIGHTS=(0.0 0.25 0.5 0.75 1.0)
 SEEDS=(0 1 2)
 
 mkdir -p "$RUN"
