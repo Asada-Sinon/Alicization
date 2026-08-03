@@ -160,6 +160,12 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
     dof = max(len(f) - 3, 1)
     cov = np.linalg.pinv(X.T @ X) * float(resid @ resid) / dof
     se2 = float(np.sqrt(max(cov[2, 2], 0.0)))
+    # 一阶项与 z 的尺度也存下来。**判决时靠分箱重建这两个量，精度低于个体级回归**，
+    # 而多存两个 float 的成本是零。一阶项是 §11.1 的一阶预测（A>B ⇒ 选择推向草）的
+    # 直接读数，本轮判决最有力的证据之一就出自它。
+    out["lin_intake"] = float(beta[1])
+    out["pref_sd"] = float(zs)
+    out["pref_mean"] = float(zc)
     out["quad_intake"] = float(beta[2])
     out["quadrel_intake"] = float(beta[2] / max(abs(beta[0]), 1e-12))
     out["quad_intake_se"] = se2
