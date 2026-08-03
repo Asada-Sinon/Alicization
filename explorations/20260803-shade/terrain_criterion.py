@@ -28,7 +28,19 @@ import numpy as np
 from underworld import Config
 from underworld import terrain as terrain_mod
 
-cfg = Config()
+# 接 `--set`，因为默认 `Config()` 不是实验跑的那个世界。
+# **勘误（result-analyst 复核时发现）**：本脚本第一版写死 `Config()`（`plant_max=2.2`），
+# 而 R9 的 96 个 run 跑的是 `--set plant_max=2.0`。全部**比值**读数不受影响（`plant_max`
+# 是全局标量，等量归一化又保总量，所以逐条复核全对），但两个**绝对**草数差 10%：
+# 草层总承载 20711.5 → 18828.7，草峰值 2.1946 → 1.9951（遮荫后 3.0511 → 2.7737）。
+# 教训：地形脚本必须能跑在实验的配置上，否则「先算地形」算的是另一个世界。
+import dataclasses
+
+from underworld.config import parse_overrides
+
+_sets = [a for i, a in enumerate(sys.argv) if i > 0 and sys.argv[i - 1] == "--set"]
+cfg = dataclasses.replace(Config(), **parse_overrides(_sets))
+print(f"config overrides: {parse_overrides(_sets) or '(none — 默认世界)'}\n")
 T0 = terrain_mod.build(cfg)
 centers = np.asarray(terrain_mod._cell_centers(cfg))
 height, rock = np.asarray(T0.height), np.asarray(T0.rock)

@@ -33,7 +33,15 @@ import numpy as np
 from underworld import Config
 from underworld import terrain as terrain_mod
 
-cfg = Config()
+# 接 `--set` —— 见 `terrain_criterion.py` 顶部记的同一处勘误：第一版写死 `Config()`
+# （`plant_max=2.2`），而 R9 跑的是 `plant_max=2.0`。比值不受影响，绝对草数差 10%。
+import dataclasses
+
+from underworld.config import parse_overrides
+
+_sets = [a for i, a in enumerate(sys.argv) if i > 0 and sys.argv[i - 1] == "--set"]
+cfg = dataclasses.replace(Config(), **parse_overrides(_sets))
+print(f"config overrides: {parse_overrides(_sets) or '(none — 默认世界)'}\n")
 T0 = terrain_mod.build(cfg)
 
 centers = np.asarray(terrain_mod._cell_centers(cfg))
