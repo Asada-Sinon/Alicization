@@ -32,7 +32,11 @@ class Terrain(NamedTuple):
     height: jax.Array      # f32 [n_cells]   elevation, ~[-basin_depth, ridge_height]
     grad_x: jax.Array      # f32 [n_cells]   d(height)/dx per *world unit*
     grad_y: jax.Array      # f32 [n_cells]
-    water_dist: jax.Array  # f32 [n_cells]   distance to nearest river/sea, world units
+    water_dist: jax.Array  # f32 [n_cells]   distance to the nearest RIVER, with sea
+    #                                        cells zeroed -- NOT distance-transformed
+    #                                        from the sea, unless `water_sea_dist` is
+    #                                        on, which makes it min(d_river, d_sea).
+    #                                        See `build` for why the difference matters.
     forest: jax.Array      # f32 [n_cells]   canopy density in [0, 1]
     rock: jax.Array        # f32 [n_cells]   bare-rock fraction in [0, 1]
     capacity: jax.Array    # f32 [n_cells]   plant carrying capacity (replaces plant_max)
@@ -156,6 +160,39 @@ def _dist_to_rivers(points: jax.Array, rivers: jax.Array, cfg: Config) -> jax.Ar
     return jax.lax.fori_loop(0, rivers.shape[0], body, best)
 
 
+def _dist_to_sea(points: jax.Array, centers: jax.Array, is_sea: jax.Array,
+                 cfg: Config) -> jax.Array:
+    """Min torus distance from each of `[N, 2]` points to any sub-sea-level cell.
+
+    Chunked one grid ROW of source cells at a time, for the same reason
+    `_dist_to_rivers` chunks by river: the full `[n_cells, n_cells]` pair matrix is
+    16384^2 f32 = 1 GiB on the default grid, which would dwarf the whole run's
+    measured 918 MiB peak. A row always divides `grid**2` exactly, whatever `grid`
+    is set to.
+
+    Masking the non-sea sources to `inf` rather than gathering the sea cells by
+    boolean index keeps every shape static. `build` only ever runs eagerly, so a
+    dynamic gather would be legal here -- but nothing else in this module needs
+    that exemption and it would be the one line that stops the module being
+    jittable.
+
+    A world with no sea at all returns all-`inf`, and `min(d_river, inf)` is then
+    exactly the old field. That is the correct answer, not a special case.
+    """
+    blk = cfg.grid
+    sea_f = is_sea.astype(points.dtype)
+
+    def body(i, best):
+        src = jax.lax.dynamic_slice(centers, (i * blk, 0), (blk, 2))
+        m = jax.lax.dynamic_slice(sea_f, (i * blk,), (blk,))
+        d = _wrap(points[:, None, :] - src[None, :, :], cfg.world_size)
+        dist = jnp.sqrt(jnp.sum(d * d, axis=2) + 1e-12)
+        dist = jnp.where(m[None, :] > 0.0, dist, jnp.inf)
+        return jnp.minimum(best, jnp.min(dist, axis=1))
+
+    return jax.lax.fori_loop(0, cfg.grid, body, jnp.full((points.shape[0],), jnp.inf))
+
+
 def build(cfg: Config) -> Terrain:
     """Compute every static terrain field once."""
     centers = _cell_centers(cfg)
@@ -171,11 +208,24 @@ def build(cfg: Config) -> Terrain:
     rivers = trace_rivers(cfg)
     d_river = _dist_to_rivers(centers, rivers, cfg)
 
-    # Open water is the antipodal lowland; treat any sub-sea-level cell as being
-    # at distance zero from water, so drinking and the water sense read the sea
-    # and the rivers through one field.
+    # Open water is the antipodal lowland; a sub-sea-level cell is at distance zero
+    # from water, so DRINKING reads the sea and the rivers through one field
+    # (`dynamics.drink` looks up `water_dist < river_half_width`).
+    #
+    # Note what this does NOT give, because the field comment on `water_dist` says
+    # "distance to nearest river/sea" and that is false for every land cell: the
+    # distance to the sea is never computed, so the land beside the ocean reads its
+    # distance to the nearest RIVER. The sea therefore has no gradient to walk up --
+    # only a step at the shoreline, which `sensors` can see about 11 world units out
+    # against a river's 30. `water_sea_dist` makes the field mean what it claims;
+    # it is off by default because turning it on changes `forest` and both
+    # capacities, i.e. it is a world change rather than a comment fix. Full accounting
+    # of what that invalidates: `config.py` on `water_sea_dist`, and
+    # docs/multispecies_program.md §13.2.
     is_sea = height < cfg.sea_level
     water_dist = jnp.where(is_sea, 0.0, d_river)
+    if cfg.water_sea_dist:
+        water_dist = jnp.minimum(water_dist, _dist_to_sea(centers, centers, is_sea, cfg))
 
     # forest: a gaussian band in elevation, fading away from water
     elev_band = jnp.exp(
@@ -189,7 +239,25 @@ def build(cfg: Config) -> Terrain:
     t = jnp.clip((height - cfg.rock_h0) / (cfg.rock_h1 - cfg.rock_h0), 0.0, 1.0)
     rock = t * t * (3.0 - 2.0 * t)                    # smoothstep
 
+    # The grazing floor. `+ forest_bonus * forest` makes closed canopy the RICHEST
+    # pasture in the world (1.538x open ground) -- which is the opposite of what the
+    # `fruit_max` comment in config.py says this world is modelling, and, since fruit
+    # is gated on `forest ** 2`, it co-sites the two food layers perfectly. That
+    # geometry is what three rounds of resource partitioning died on. `grass_shade`
+    # subtracts a canopy-suppression term and renormalises, so the knob moves grass
+    # WITHOUT changing how much there is -- the same separation of *where* from *how
+    # much* that `fruit_dry_weight` below enforces, and for the same reason: thickening
+    # a food layer is an already-falsified route (experiments.md §5) and an explicit
+    # non-goal. Default 0.0 skips the branch outright, so the field is bit-identical to
+    # the pre-knob kernel. docs/multispecies_program.md §13.
     fertility = cfg.grass_base + cfg.forest_bonus * forest
+    if cfg.grass_shade > 0.0:
+        shaded = jnp.clip(fertility - cfg.grass_shade * forest, 0.0, None)
+        # `keep` is exactly the weight `capacity` applies below, so equalising
+        # `sum(keep * fertility)` equalises total capacity to the last ulp.
+        keep = jnp.where(is_sea, 0.0, 1.0 - rock)
+        scale = jnp.sum(keep * fertility) / jnp.maximum(jnp.sum(keep * shaded), 1e-12)
+        fertility = shaded * scale
     capacity = cfg.plant_max * fertility * (1.0 - rock)
     capacity = jnp.where(is_sea, 0.0, capacity)       # nothing grazes open water
 

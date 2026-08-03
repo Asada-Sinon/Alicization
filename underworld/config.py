@@ -279,6 +279,37 @@ class Config:
     river_steps: int = 400            # traced points per river (static shape)
     river_step_len: float = 2.0       # world units per descent step
     river_half_width: float = 8.0     # half-width of the drinkable band
+    water_sea_dist: bool = False      # make `water_dist` mean what its field comment
+    #                                   says -- "distance to nearest river/SEA" -- by
+    #                                   taking min(d_river, d_sea) instead of zeroing
+    #                                   sea cells and leaving the land reading d_river.
+    #                                   False = off and bit-exact (d_sea is not even
+    #                                   computed), so golden does not move.
+    #
+    #                                   What is actually wrong today (docs/
+    #                                   multispecies_program.md §13.2): drinking IS
+    #                                   correct -- `dynamics.drink` looks up
+    #                                   `wd < river_half_width` and a sea cell reads 0,
+    #                                   so standing in the sea refills. What is missing
+    #                                   is the GRADIENT: `sensors` samples one cell per
+    #                                   sector at food_sample_dist=9, so the sea is a
+    #                                   step function at the shoreline with an effective
+    #                                   detection range of ~11 world units against a
+    #                                   river's 30. Measured: the 376 land cells within
+    #                                   8 units of the sea have a median `water_dist` of
+    #                                   54.7 -- standing at the ocean, read as desert.
+    #                                   27.2% of land is overstated, median by 43.3.
+    #
+    #                                   Turning it ON is a WORLD CHANGE, not a bug fix:
+    #                                   `water_dist` feeds `water_prox` -> `forest` ->
+    #                                   both capacities. It also invalidates archived
+    #                                   numbers -- docs/biology.md:156 ("sensing 30 <
+    #                                   median 35.5, so half the map reads zero water")
+    #                                   REVERSES (median 27.45), and `fruit_dry_d0/d1`
+    #                                   below lose their calibration (they are anchored
+    #                                   to the land median 45.2 / p90 103.7, which
+    #                                   become 34.8 / 74.4). Do not open both this and
+    #                                   `fruit_dry_weight` without re-anchoring those.
 
     # --- forest: mid-elevation, near water ---
     forest_elev: float = 0.10         # elevation the canopy peaks at
@@ -287,6 +318,41 @@ class Config:
     #                                   as a fraction of world_size
     grass_base: float = 0.65          # open-ground fertility (fraction of plant_max)
     forest_bonus: float = 0.35        # extra fertility under full canopy
+    grass_shade: float = 0.0          # canopy suppression of the herb layer:
+    #                                   fertility = clip(grass_base + forest_bonus*forest
+    #                                                    - grass_shade*forest, 0, None),
+    #                                   renormalised to hold TOTAL grass capacity fixed.
+    #                                   0.0 = off and bit-exact (the branch in
+    #                                   `terrain.build` is skipped outright), so
+    #                                   `scripts/golden.json` does not move.
+    #
+    #                                   Why it exists: the `fruit_max` comment below
+    #                                   states the design intent -- "the canopy shading
+    #                                   out the herb layer ... a low grazing floor with a
+    #                                   high-value exception scattered through it" -- but
+    #                                   the line above gives full canopy 1.538x the
+    #                                   grazing of open ground, making the forest the
+    #                                   BEST pasture in the world. Fruit is gated on
+    #                                   `forest**2`, so the two food layers are exactly
+    #                                   co-sited and "eat either" strictly beats
+    #                                   specialising: three rounds of resource-
+    #                                   partitioning died on that geometry (§9.6, §9.10,
+    #                                   §12). Measured on the terrain alone: at the
+    #                                   default there is NOT ONE cell in the top decile
+    #                                   of fruit whose grass is below 30% of the land
+    #                                   mean; at grass_shade=1.3 there are 173 (80.5%).
+    #                                   docs/multispecies_program.md §13.
+    #
+    #                                   Note <=1.0 is reproducible with no new code at
+    #                                   all: `forest_bonus` has no clamp and is consumed
+    #                                   only by that one line, so grass_shade=s is
+    #                                   forest_bonus=(0.35-s) up to a global scalar that
+    #                                   the renormalisation removes. The knob earns its
+    #                                   keep only ABOVE 1.0, where the clip at zero
+    #                                   starts to bite -- and that clip is the sole
+    #                                   source of "fruit but no grass" cells (zero-grass
+    #                                   land 5.0% -> 11.4% at 1.3). tests/
+    #                                   test_terrain_grass_shade.py pins both facts.
     forest_slow: float = 0.25         # speed penalty at full canopy
     forest_occlusion: float = 0.35    # vision-radius penalty at full canopy. Note
     #                                   attack_range is deliberately NOT reduced:
