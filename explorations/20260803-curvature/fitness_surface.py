@@ -51,34 +51,52 @@ from underworld import Config, new_world
 from underworld import state as state_mod
 
 SAMPLE_EVERY = 10          # 抓快照的间隔
-SAMPLE_STEPS = 2000        # 烧机后再跑这么多步做统计
+SAMPLE_STEPS = 6000        # 烧机后再跑这么多步做统计。**从 2000 提到 6000**：
+#                            标定 pilot 实测 quad_intake 的 σ_within=0.00274，那是生态
+#                            混沌不是采样噪声，但把窗口拉长仍能多平均掉一部分。
+#                            代价是每个 run 约 +1 分钟，相对 96 个 run 的判决很便宜。
 BINS = np.linspace(0.15, 0.85, 15)
 
 
 def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
     cfg = dataclasses.replace(Config(), seed=seed, **(overrides or {}))
     state, key, _step, scan_fn, _terrain = new_world(cfg)
+    CAUSES = ("predation", "starvation", "thirst", "senescence")
+    toll = {c: 0.0 for c in CAUSES}
+    pops, row = [], {}
+
+    def _absorb(ms):
+        d = ms._asdict()
+        for c in CAUSES:
+            toll[c] += float(np.asarray(d[f"death_{c}"]).sum())
+        pops.append(float(np.asarray(d["population"])[-1]))
+        return {k: float(np.asarray(v)[-1]) for k, v in d.items()}
+
     done = 0
     while done < steps:                       # 烧机
         take = min(500, steps - done)
-        state, key, _ = scan_fn(state, key, take)
+        state, key, ms = scan_fn(state, key, take)
+        row = _absorb(ms)
         done += take
 
+    n_frames = SAMPLE_STEPS // SAMPLE_EVERY
     pref_all, food_all = [], []
-    hist0 = None
-    for i in range(SAMPLE_STEPS // SAMPLE_EVERY):
-        state, key, _ = scan_fn(state, key, SAMPLE_EVERY)
+    for _ in range(n_frames):
+        state, key, ms = scan_fn(state, key, SAMPLE_EVERY)
+        row = _absorb(ms)
         alive = np.asarray(state.alive)
         diet = np.asarray(state.diet)
         herb = alive & (diet < 0.35)
-        p = np.asarray(state_mod.forage_pref_of(state.genome, cfg))[herb]
-        f = np.asarray(state.last_food)[herb]
-        pref_all.append(p)
-        food_all.append(f)
-        if i == 0:
-            hist0 = np.histogram(p, bins=BINS)[0].astype(float)
-    hist1 = np.histogram(pref_all[-1], bins=BINS)[0].astype(float)
+        pref_all.append(np.asarray(state_mod.forage_pref_of(state.genome, cfg))[herb])
+        food_all.append(np.asarray(state.last_food)[herb])
     jax.block_until_ready(state.genome)
+
+    # 人口学侧：**前 1/4 帧与后 1/4 帧各自合并**再做直方图，不是拿首尾各一帧。
+    # 第一版用的是单帧，实测 4 个格里只有 2 个能凑够有效箱——单帧的计数太稀，
+    # 而这是要当主判据的读数，估计量不稳比功效不足更糟。合并把计数放大 50 倍。
+    q = max(n_frames // 4, 1)
+    hist0 = np.histogram(np.concatenate(pref_all[:q]), bins=BINS)[0].astype(float) / q
+    hist1 = np.histogram(np.concatenate(pref_all[-q:]), bins=BINS)[0].astype(float) / q
 
     p = np.concatenate(pref_all)
     f = np.concatenate(food_all)
@@ -93,28 +111,79 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
            "bin_centers": ctr.tolist(), "bin_n": n.tolist(),
            "intake": np.where(ok, intake, None).tolist(), "overrides": overrides or {}}
 
+    # 分布形状与护栏也一并给出，这样一个 run 同时回答「曲面什么形状」和「分布分开了吗」，
+    # 不必为了拿 sd 再跑一遍 probe_trait_dist（同一条纪律：一个 run 答完一次判决要的全部）。
+    last = pref_all[-1]
+    out["sd"] = float(last.std())
+    out["mean_pref"] = float(last.mean())
+    sys.path.insert(0, "scripts")
+    from probe_trait_dist import bimodality_coefficient, blrt_two_components
+    if len(last) >= 30:
+        out["bimodality_coefficient"] = float(bimodality_coefficient(last.astype(np.float64)))
+        t = blrt_two_components(last.astype(np.float64), n_boot=199, seed=seed)
+        out["blrt_lr_per_n"] = t["lr_per_n"]
+    total = max(sum(toll.values()), 1.0)
+    out.update({f"death_{k}_frac": toll[k] / total for k in CAUSES})
+    out["min_pop"] = float(np.min(pops)) if pops else float("nan")
+    for g in ("population", "carnivore_frac", "carn_speed", "herb_speed",
+              "frugivory_frac", "graze_gain", "fruit_gain"):
+        out[g] = row.get(g, float("nan"))
+
     print(f"样本 {len(p)} 个体·快照（{SAMPLE_STEPS // SAMPLE_EVERY} 帧 × 平均 "
           f"{len(p) * SAMPLE_EVERY // SAMPLE_STEPS} 食草者）")
     print(f'\n  {"pref":>6} {"n":>8} {"平均摄入":>10} {"密度变化率":>12}')
-    dlog = np.where((hist0 > 20) & (hist1 > 20), np.log(np.maximum(hist1, 1) /
-                                                        np.maximum(hist0, 1)), np.nan)
+    # 门槛必须与下面拟合用的掩码**同一个**——第一版这里写 >20、拟合写 >5，
+    # 于是拟合把 dlog 为 NaN 的箱也纳进去，整条曲线读出 NaN。
+    MIN_CT = 5.0
+    dmask = (hist0 > MIN_CT) & (hist1 > MIN_CT)
+    dlog = np.where(dmask, np.log(np.maximum(hist1, 1e-9) / np.maximum(hist0, 1e-9)),
+                    np.nan)
     for i, c in enumerate(ctr):
         print(f"  {c:>6.3f} {n[i]:>8d} "
               f"{intake[i] if ok[i] else float('nan'):>10.4f} "
               f"{dlog[i]:>12.4f}")
 
-    # 二次拟合的二阶系数——§11.1 预测 k=1 时 ≈0、k<1 时 >0（中间是极小）
-    for name, y in (("摄入", intake), ("密度变化率", dlog)):
-        m = ~np.isnan(y)
-        if m.sum() >= 5:
-            # 以基因均值为中心、按方差归一，让不同臂的二阶系数可比
-            x = (ctr[m] - ctr[m].mean()) / max(ctr[m].std(), 1e-9)
-            c2, c1, c0 = np.polyfit(x, y[m], 2)
-            rel = c2 / max(abs(c0), 1e-12)
-            out[f"quad_{'intake' if name == '摄入' else 'demog'}"] = float(c2)
-            out[f"quadrel_{'intake' if name == '摄入' else 'demog'}"] = float(rel)
-            print(f"\n  {name}曲线二次拟合: 二阶系数 {c2:+.5f} "
-                  f"(÷截距 {rel:+.4f}) ⇒ 中间型是{'**极小(分歧)**' if c2 > 0 else '极大(稳定化)'}")
+    # --- 二次系数：§11.1 预测 k=1 时 ≈0、k<1 时 >0（中间型是极小值）---
+    #
+    # **第一版把两条曲线都建在「先分箱求均值、再对 4–5 个箱心做 polyfit」上，那个估计量
+    # 太脆**：有效箱数随臂变化（k=1 有 5 个、k=0.5 有 4 个），每个箱心的噪声又差几个数量级
+    # （n 从 40 到 90939）。主判据不能建在这种东西上。两条都改成加权，权重就是各自的样本量。
+    #
+    # 摄入侧干脆不分箱：直接在**个体级**上回归 last_food ~ 1 + z + z²。分箱只会丢掉信息，
+    # 而个体级回归的自由度是 3×10^5 而不是 5。
+    zc, zs = p.mean(), max(p.std(), 1e-9)
+    z = (p - zc) / zs
+    X = np.stack([np.ones_like(z), z, z * z], axis=1)
+    beta, *_ = np.linalg.lstsq(X, f, rcond=None)
+    resid = f - X @ beta
+    # 系数的标准误——用来判「二次项是不是真的不为 0」，不是拿来当跨臂噪声
+    dof = max(len(f) - 3, 1)
+    cov = np.linalg.pinv(X.T @ X) * float(resid @ resid) / dof
+    se2 = float(np.sqrt(max(cov[2, 2], 0.0)))
+    out["quad_intake"] = float(beta[2])
+    out["quadrel_intake"] = float(beta[2] / max(abs(beta[0]), 1e-12))
+    out["quad_intake_se"] = se2
+    print(f"\n  摄入曲面（个体级回归，n={len(f)}）: 二次项 {beta[2]:+.5f} ± {se2:.5f}"
+          f"  (÷截距 {beta[2] / max(abs(beta[0]), 1e-12):+.4f})"
+          f"  ⇒ 中间型是{'**极小(分歧)**' if beta[2] > 0 else '极大(稳定化)'}")
+
+    # 人口学侧仍需分箱（密度变化率本来就是箱量），但改成**按样本量加权**的二次拟合，
+    # 并把「有效箱」的门槛从 20 降到 5 同时靠权重自动压低稀疏箱的影响。
+    m = dmask
+    if m.sum() >= 4:
+        zb = (ctr[m] - zc) / zs
+        w = np.sqrt(np.minimum(hist0[m], hist1[m]))     # ~ dlog 的精度 ∝ √n
+        Xb = np.stack([np.ones_like(zb), zb, zb * zb], axis=1) * w[:, None]
+        bb, *_ = np.linalg.lstsq(Xb, dlog[m] * w, rcond=None)
+        out["quad_demog"] = float(bb[2])
+        out["quadrel_demog"] = float(bb[2] / max(abs(bb[0]), 1e-12))
+        out["demog_bins"] = int(m.sum())
+        print(f"  人口学曲面（{int(m.sum())} 箱，按 √n 加权）: 二次项 {bb[2]:+.5f}"
+              f"  (÷截距 {bb[2] / max(abs(bb[0]), 1e-12):+.4f})"
+              f"  ⇒ 中间型是{'**极小(分歧)**' if bb[2] > 0 else '极大(稳定化)'}")
+    else:
+        out["quad_demog"] = float("nan")
+        print(f"  人口学曲面: 有效箱只有 {int(m.sum())} 个，不拟合")
 
     if as_json:
         print("JSON " + json.dumps(out))
