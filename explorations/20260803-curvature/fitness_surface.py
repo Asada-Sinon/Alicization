@@ -48,6 +48,10 @@ sys.path.insert(0, ".")
 import jax
 import numpy as np
 
+sys.path.insert(0, "explorations/20260804-readouts")
+
+from split_score import split_score            # 位置无关的分裂统计量，单一实现
+
 from underworld import Config, new_world
 from underworld import state as state_mod
 
@@ -81,7 +85,7 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
         done += take
 
     n_frames = SAMPLE_STEPS // SAMPLE_EVERY
-    pref_all, food_all = [], []
+    pref_all, food_all, drink_all = [], [], []
     for _ in range(n_frames):
         state, key, ms = scan_fn(state, key, SAMPLE_EVERY)
         row = _absorb(ms)
@@ -90,6 +94,10 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
         herb = alive & (diet < 0.35)
         pref_all.append(np.asarray(state_mod.forage_pref_of(state.genome, cfg))[herb])
         food_all.append(np.asarray(state.last_food)[herb])
+        # **也收饮水**。`last_food` 是纯能量，不含果实携带的水（`fruit_water_frac`），
+        # 而这个世界 55–62% 的死是渴死——**能量曲面根本不是适应度曲面**
+        # （`docs/multispecies_feasibility.md §13.4` 末尾）。存下来才能看两种货币各自的形状。
+        drink_all.append(np.asarray(state.last_drink)[herb])
     jax.block_until_ready(state.genome)
 
     # 人口学侧：**前 1/4 帧与后 1/4 帧各自合并**再做直方图，不是拿首尾各一帧。
@@ -119,14 +127,30 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
     # R11 判决里 `sd` 的效应/噪声 0.55、p=0.176（判 undecidable），换成池化口径重算是
     # **0.85、p=0.012、符号 7+→9+**，零额外 run 成本。「功效不足」有一半是测量代码自找的。
     last = np.concatenate(pref_all)
-    out["sd"] = float(last.std())
+    # **`sd` 取「逐帧 sd 的帧均值」，不是「池化样本的 sd」。** 两者差 2.4 倍，
+    # 而且量的不是同一件事：池化样本的 sd 把 600 帧之间**均值的漂移**也算进去了，
+    # 于是它从「某一刻的现存遗传方差」变成「跨个体 + 跨时间的总方差」。
+    # 逐帧算再平均，含义不变，而 600 次测量的功效增益照拿——那才是改口径的目的
+    # （`MEMORY.md [LEARN:stats]`：判据级读数要与主判据同采样基）。
+    out["sd"] = float(np.mean([x.std() for x in pref_all]))
+    out["sd_pooled"] = float(last.std())              # 含时间漂移的那个，留作对照
     out["mean_pref"] = float(last.mean())
     out["sd_lastframe"] = float(pref_all[-1].std())   # 留一条与历史 run 可比的旧口径
+    # **BLRT 必须在子样本上跑。** 改成 600 帧池化之后 `last` 从约 2000 个体涨到约 120 万，
+    # 而 `blrt_two_components` 要在它上面做 200 次自助 EM——实测单 run 十分钟以上跑不完。
+    # 上限取 2000 而不是更大：`blrt_lr_per_n` 除以 n，样本量变了统计量的尺度也变，
+    # 2000 与 R10/R11 归档时的实际携带者数（约 1500–2500）同量级，跨轮仍可比。
+    # 抽样基仍是 600 帧池化，不是末帧一帧——那才是这次改动的目的。
+    _CAP = 2000
+    _rng = np.random.default_rng(seed)
+    blrt_sample = (last if len(last) <= _CAP
+                   else last[_rng.choice(len(last), _CAP, replace=False)])
     sys.path.insert(0, "scripts")
     from probe_trait_dist import bimodality_coefficient, blrt_two_components
     if len(last) >= 30:
         out["bimodality_coefficient"] = float(bimodality_coefficient(last.astype(np.float64)))
-        t = blrt_two_components(last.astype(np.float64), n_boot=199, seed=seed)
+        t = blrt_two_components(blrt_sample.astype(np.float64), n_boot=199, seed=seed)
+        out["blrt_n"] = int(len(blrt_sample))
         out["blrt_lr_per_n"] = t["lr_per_n"]
     # --- dip_ratio：把「真分裂」和「整体移走」分开 ---
     #
@@ -151,6 +175,13 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
     # 边界 0.35 落在 `BINS` 的箱边上，无自由度。
     out["low_mass"] = float(_n[ctr < 0.35].sum())
     out["high_mass"] = float(_n[ctr > 0.65].sum())
+    _ss, _sat = split_score(n, ctr)
+    out["split_score"] = _ss
+    out["split_at"] = _sat
+    # 逐箱平均饮水，与 `intake` 同结构
+    _dr = np.concatenate(drink_all)
+    out["drink_per_bin"] = [float(_dr[idx == i].mean()) if (idx == i).sum() >= 30 else None
+                            for i in range(len(ctr))]
     out["frac_mid"] = _obs
     out["dip_ratio"] = _obs / max(_exp, 1e-9)
     out["occ_mean"] = _m
@@ -222,6 +253,11 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
         w = np.sqrt(np.minimum(hist0[m], hist1[m]))     # ~ dlog 的精度 ∝ √n
         Xb = np.stack([np.ones_like(zb), zb, zb * zb], axis=1) * w[:, None]
         bb, *_ = np.linalg.lstsq(Xb, dlog[m] * w, rcond=None)
+        # **逐箱 dlog 全存下来**。第一版只存 `demog_bins`（可用箱数），于是判决时
+        # 答不出「少数簇在增长还是在消失」——那正是「稳定多态 vs 走向固定的暂态」的关键。
+        out["dlog_per_bin"] = [None if not np.isfinite(v) else float(v) for v in dlog]
+        out["hist0"] = [float(v) for v in hist0]
+        out["hist1"] = [float(v) for v in hist1]
         out["quad_demog"] = float(bb[2])
         out["quadrel_demog"] = float(bb[2] / max(abs(bb[0]), 1e-12))
         out["demog_bins"] = int(m.sum())
