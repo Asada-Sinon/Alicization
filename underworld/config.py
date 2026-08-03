@@ -552,6 +552,40 @@ class Config:
     fruit_patch_threshold: float = 0.55  # keeps roughly the top ~20% of the sine
     #                                   product; with forest**2 on top this lands
     #                                   fruit on a small percentage of the map
+    fruit_dry_weight: float = 0.0     # blends fruit's habitat term away from
+    #                                   `forest**2` and toward "far from water".
+    #                                   0 = off and bit-exact (the branch in
+    #                                   `terrain.build` is skipped outright), 1 =
+    #                                   fruit sited purely by distance to water.
+    #                                   Why this knob exists (docs/
+    #                                   multispecies_program.md §12): `forest` is
+    #                                   `elev_band * water_prox`, so `forest**2`
+    #                                   grows fruit in the same riparian strip
+    #                                   thirst already pins every agent to. Grass
+    #                                   and fruit interleave, an individual meets
+    #                                   both all its life, and omnivory strictly
+    #                                   beats specialising -- stabilising selection
+    #                                   then squeezes `forage_pref` variance 38%
+    #                                   *below* neutral drift (§9.6). Three rounds
+    #                                   (thicken the fruit layer, redistribute it
+    #                                   at equal energy, crank selection strength)
+    #                                   all died on that one geometry. Pulling the
+    #                                   two bowls apart in space is the only thing
+    #                                   left untried.
+    fruit_dry_d0: float = 45.0        # smoothstep edges of the "dry" band, in world
+    fruit_dry_d1: float = 105.0       #   units of distance to water. Measured on the
+    #                                   default terrain (explorations/
+    #                                   20260803-overlapA): land `water_dist` runs
+    #                                   0-148 with median 45.2 and p90 103.7, while
+    #                                   today's fruit sits at a capacity-weighted
+    #                                   mean of 25.8 -- decisively riparian. So the
+    #                                   ramp starts at the land median and saturates
+    #                                   near p90: at w=1 fruit concentrates in the
+    #                                   drier ~quarter of the map. NOTE two figures
+    #                                   in §12.2 were wrong and are corrected here:
+    #                                   `river_half_width` is 8.0, not 16, and the
+    #                                   `herb_water_dist` baseline is 45.4, not
+    #                                   10-25 (12x2 seeds, §12.3.A).
     fruit_water_frac: float = 0.10    # water drawn per unit of fruit BIOMASS eaten.
     #                                   Deliberately equal to forage_water_frac's
     #                                   default, so the default world is bit-exact

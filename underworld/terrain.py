@@ -204,7 +204,45 @@ def build(cfg: Config) -> Terrain:
         (px * py - cfg.fruit_patch_threshold) / (1.0 - cfg.fruit_patch_threshold),
         0.0, 1.0,
     )
-    fruit_capacity = cfg.fruit_max * patch * (forest ** 2) * (1.0 - rock)
+    # The habitat term is what decides *where* fruit grows, and it is the whole
+    # subject of docs/multispecies_program.md §12. `forest ** 2` puts fruit in the
+    # closed canopy -- but `forest` is itself `elev_band * water_prox`, so squaring
+    # it lands fruit squarely in the riparian strip every agent is already pinned
+    # to by thirst. Grass and fruit then interleave in space, an individual meets
+    # both all its life, and "eat either" strictly beats specialising: three rounds
+    # of resource-partitioning experiments died on that geometry (§9.6, §9.10,
+    # §11). `fruit_dry_weight` blends in a term that depends on distance *from*
+    # water instead, pulling the two bowls apart.
+    #
+    # Default 0.0 skips the branch entirely, so the field is bit-identical to the
+    # pre-knob kernel and `scripts/golden.json` does not move -- same
+    # compile-time-gate idiom as `forage_tradeoff` in `dynamics.graze`. Gating
+    # rather than arithmetic blending also keeps `0.0 * dry` from being able to
+    # poison the sum if `dry` ever went non-finite.
+    habitat = forest ** 2
+    if cfg.fruit_dry_weight > 0.0:
+        d = jnp.clip(
+            (water_dist - cfg.fruit_dry_d0) / (cfg.fruit_dry_d1 - cfg.fruit_dry_d0),
+            0.0, 1.0,
+        )
+        dry = d * d * (3.0 - 2.0 * d)                 # smoothstep, as for `rock`
+        w = cfg.fruit_dry_weight
+        blended = (1.0 - w) * habitat + w * dry
+        # Renormalise so the knob moves fruit WITHOUT changing how much there is.
+        # Measured before this line existed: blending to w=1 raised total fruit
+        # capacity 536.8 -> 1026.3, +91%. That is not a side effect to wave at --
+        # `forest**2` is small almost everywhere (a narrow band, squared) while
+        # `dry` saturates at 1 over a quarter of the map, so any blend toward
+        # `dry` silently thickens the layer. An arm run that way would be both
+        # "fruit moved" and "twice as much fruit", and no effect could be
+        # attributed to either. Thickening the fruit layer is also already a
+        # closed, falsified route (§8.3, experiments.md §5) and an explicit
+        # non-goal of §12. Same discipline as the equal-energy redistribution of
+        # §11: separate *where* from *how much*, always.
+        keep = jnp.where(is_sea, 0.0, patch * (1.0 - rock))
+        scale = jnp.sum(keep * habitat) / jnp.maximum(jnp.sum(keep * blended), 1e-12)
+        habitat = blended * scale
+    fruit_capacity = cfg.fruit_max * patch * habitat * (1.0 - rock)
     fruit_capacity = jnp.where(is_sea, 0.0, fruit_capacity)
 
     return Terrain(

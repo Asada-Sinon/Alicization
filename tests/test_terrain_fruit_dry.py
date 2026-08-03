@@ -82,6 +82,24 @@ def test_fruit_dry_weight_one_decouples_from_forest():
     assert wd1 > wd0, f"果层没有往离水远处挪：加权水距 {wd0:.2f} -> {wd1:.2f}"
 
 
+@pytest.mark.parametrize("w", [0.25, 0.5, 0.75, 1.0])
+def test_fruit_dry_weight_is_capacity_neutral(w):
+    """旋钮只**挪动**果层，不改变**总量**——这是 C/D 能归因的前提。
+
+    没有这条归一化时，实测 w=1 把总承载从 536.8 抬到 1026.3（+91%）：`forest**2` 在
+    几乎所有格上都很小（窄带再平方），而 `dry` 在四分之一张图上饱和到 1，所以任何朝
+    `dry` 的混合都会顺带把果层加厚。那样的臂同时是「挪开了」和「厚了一倍」，效应无法
+    归因给任何一个——而「加厚果层」本身已是被证伪的关闭路线（§8.3 / experiments.md §5），
+    也是 §12 明写的非目标。
+    """
+    c0 = np.asarray(terrain_mod.build(Config()).fruit_capacity)
+    cw = np.asarray(terrain_mod.build(Config(fruit_dry_weight=w)).fruit_capacity)
+    assert cw.sum() == pytest.approx(c0.sum(), rel=1e-5), (
+        f"w={w} 改变了果层总承载 {c0.sum():.3f} -> {cw.sum():.3f}；"
+        "这个旋钮只许挪动，不许加厚"
+    )
+
+
 def test_fruit_dry_band_edges_are_ordered():
     """`fruit_dry_d0 < fruit_dry_d1`，否则 smoothstep 的分母为 0。"""
     cfg = Config()
