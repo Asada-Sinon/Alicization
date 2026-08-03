@@ -114,9 +114,14 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
 
     # 分布形状与护栏也一并给出，这样一个 run 同时回答「曲面什么形状」和「分布分开了吗」，
     # 不必为了拿 sd 再跑一遍 probe_trait_dist（同一条纪律：一个 run 答完一次判决要的全部）。
-    last = pref_all[-1]
+    # **池化全部 600 帧，不是只取末帧**。第一版写的是 `last = pref_all[-1]`，而主判据
+    # （`dip_ratio` / `frac_mid`）算在 600 帧池化的 `bin_n` 上——两种口径混用的代价是实测的：
+    # R11 判决里 `sd` 的效应/噪声 0.55、p=0.176（判 undecidable），换成池化口径重算是
+    # **0.85、p=0.012、符号 7+→9+**，零额外 run 成本。「功效不足」有一半是测量代码自找的。
+    last = np.concatenate(pref_all)
     out["sd"] = float(last.std())
     out["mean_pref"] = float(last.mean())
+    out["sd_lastframe"] = float(pref_all[-1].std())   # 留一条与历史 run 可比的旧口径
     sys.path.insert(0, "scripts")
     from probe_trait_dist import bimodality_coefficient, blrt_two_components
     if len(last) >= 30:
@@ -141,6 +146,11 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
     _sd = math.sqrt(max(float((_n * (ctr - _m) ** 2).sum()), 1e-12))
     _obs = float(_n[_mid].sum())
     _exp = float(_norm.cdf(0.60, _m, _sd) - _norm.cdf(0.40, _m, _sd))
+    # `low_mass`：少数模态（果实专精侧）的质量。**§15.3 预注册了它却没实现**，
+    # R11 判决前才从 `bin_n` 补算——预注册与实现脱节，这里补死。
+    # 边界 0.35 落在 `BINS` 的箱边上，无自由度。
+    out["low_mass"] = float(_n[ctr < 0.35].sum())
+    out["high_mass"] = float(_n[ctr > 0.65].sum())
     out["frac_mid"] = _obs
     out["dip_ratio"] = _obs / max(_exp, 1e-9)
     out["occ_mean"] = _m
