@@ -31,9 +31,20 @@ from exp_stats import RunSet, mde_sign_consistent, one_sample, paired, required_
 DIR = "outputs/20260803-overlapA"
 SEEDS, REPS = list(range(12)), [1, 2]
 
-# 只分析日志已经齐全的臂，这样 base 跑完就能先看，不必等 niche。
-ARMS = [a for a in ("base", "niche")
-        if all(os.path.exists(f"{DIR}/{a}_s{s}_r{r}.log") for s in SEEDS for r in REPS)]
+# 只分析**已跑完**的臂，这样 base 跑完就能先看，不必等 niche。
+# 判据是「文件里已经有 JSON 行」而不是「文件存在」——sweep 一启动进程文件就存在了，
+# 按存在判会把半截日志当成完整数据读进来。
+def _done(arm: str) -> bool:
+    for s in SEEDS:
+        for r in REPS:
+            p = f"{DIR}/{arm}_s{s}_r{r}.log"
+            if not os.path.exists(p) or not any(
+                    ln.startswith("JSON ") for ln in open(p).read().splitlines()):
+                return False
+    return True
+
+
+ARMS = [a for a in ("base", "niche") if _done(a)]
 
 # 预注册的主口径（§12.3.A，commit 57a49a7）。次口径与护栏跟在后面。
 PRIMARY = "sel_ratio_water"

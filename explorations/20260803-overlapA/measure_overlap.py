@@ -104,6 +104,12 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
     occ = np.zeros(cfg.n_cells, dtype=np.float64)   # 累加的个体密度
     frames = 0
     start_sampling = int(steps * (1.0 - SAMPLE_FRACTION))
+    # 死因台账，口径与 scripts/run_headless.py:75-81 相同（全程累加，不是末帧快照）。
+    # C 阶段要用 death_thirst_frac：把果层推进干旱带之后，最可能的失败方式不是「没人去吃」
+    # 而是「跟着果层走进去然后渴死」——A 实测 niche 世界的种群扣掉水距后仍以 3.7× 追踪果层，
+    # 所以 §12.4 风险 1 预设的「没人去」不是唯一的失败模式。
+    CAUSES = ("predation", "starvation", "thirst", "senescence")
+    toll = {f"death_{c}": 0.0 for c in CAUSES}
 
     done = 0
     last_m = None
@@ -112,6 +118,8 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
         state, key, ms = scan_fn(state, key, chunk)
         done += chunk
         last_m = ms
+        for k in toll:
+            toll[k] += float(np.asarray(getattr(ms, k)).sum())
         pop = int(np.asarray(state.alive).sum())
         if pop < 1:
             print("!! population collapsed to zero")
@@ -168,8 +176,15 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
         "population": float(np.asarray(last_m.population)[-1]),
         "carnivore_frac": float(np.asarray(last_m.carnivore_frac)[-1]),
         "frugivory_frac": float(np.asarray(last_m.frugivory_frac)[-1]),
+        # herb_water_dist 不只是护栏：主口径 sel_ratio_water 的零模型用的是**实测个体自己
+        # 的水距边缘分布**，也就是一个处理后变量。手术若把果层推向干旱带、种群跟过去一部分，
+        # 零模型会跟着一起移，于是 sel_ratio_water 只回答「在它们最终所在的水距上还追不追
+        # 果层」。**「种群有没有离开河岸」必须另外读 herb_water_dist。**
         "herb_water_dist": float(np.asarray(last_m.herb_water_dist)[-1]),
         "forest_frac": float(np.asarray(last_m.forest_frac)[-1]),
+        # 全程累加的死因份额（口径同 run_headless.py），不是末帧快照
+        "total_deaths": sum(toll.values()),
+        **{f"{k}_frac": v / max(sum(toll.values()), 1.0) for k, v in toll.items()},
         "overrides": overrides or {},
     }
 

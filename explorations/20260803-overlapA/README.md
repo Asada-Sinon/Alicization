@@ -23,3 +23,8 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python \
 
 重跑整批：`bash outputs/20260803-overlapA/sweep.sh`（并发上限 6）。
 判决分析：`analyze.py`（import `scripts/exp_stats.py`）。
+
+本目录另有一个补充脚本 `resolution_and_tolerances.py`：算 C/D 的**判据容差数值**
+（1×/2×`√2·σ̂_W/√r`，分臂与池化）、**p≤0.05 口径的 MDE**（`analyze.py` 报的是顶到
+地板 p 的口径，对 n=12 偏保守）、以及 base 臂主口径的「可下降空间 ÷ MDE」——
+后者是「C/D 该用哪个臂当基线」的判据。重跑同样是 `.venv/bin/python explorations/20260803-overlapA/resolution_and_tolerances.py`。
