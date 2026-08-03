@@ -107,61 +107,62 @@ def load(pat, remap=None):
     return rec
 
 
-R = load("outputs/20260804-demand/*.log")
-R.update(load("outputs/20260803-curvature/r10/[NK]*.log", {"N": "N15", "K10": "T15"}))
-S = list(range(12))
-ARMS = ["N15", "T15", "N05", "T05", "N05m", "T05m"]
-CTR = np.array(R[("N15", 0, 1)]["bin_centers"])
+if __name__ == "__main__":
+    R = load("outputs/20260804-demand/*.log")
+    R.update(load("outputs/20260803-curvature/r10/[NK]*.log", {"N": "N15", "K10": "T15"}))
+    S = list(range(12))
+    ARMS = ["N15", "T15", "N05", "T05", "N05m", "T05m"]
+    CTR = np.array(R[("N15", 0, 1)]["bin_centers"])
 
 
-def cell(a, fn):
-    return np.array([np.mean([fn(R[(a, s, r)]) for r in (1, 2)]) for s in S])
+    def cell(a, fn):
+        return np.array([np.mean([fn(R[(a, s, r)]) for r in (1, 2)]) for s in S])
 
 
-ss = lambda d: split_score(d["bin_n"], CTR)[0]
-sa = lambda d: split_score(d["bin_n"], CTR)[1]
-dr = lambda d: dip_ratio(d["bin_n"], CTR)
+    ss = lambda d: split_score(d["bin_n"], CTR)[0]
+    sa = lambda d: split_score(d["bin_n"], CTR)[1]
+    dr = lambda d: dip_ratio(d["bin_n"], CTR)
 
-print("=" * 88)
-print("split_score vs dip_ratio，在 R11 的 144 个 run 上（零新增 GPU 成本）")
-print("=" * 88)
-print(f'  {"臂":<6} {"split_score":>12} {"分割点位置":>11} {"dip_ratio":>11} {"低簇质量":>9}')
-for a in ARMS:
-    v = cell(a, ss)
-    loc = cell(a, sa)
-    print(f"  {a:<6} {v.mean():>12.4f} {np.nanmean(loc):>11.3f} {cell(a, dr).mean():>11.4f} "
-          f"{cell(a, lambda d: np.array(d['bin_n'], float)[CTR < 0.35].sum() / max(np.array(d['bin_n'], float).sum(), 1)).mean():>9.4f}")
+    print("=" * 88)
+    print("split_score vs dip_ratio，在 R11 的 144 个 run 上（零新增 GPU 成本）")
+    print("=" * 88)
+    print(f'  {"臂":<6} {"split_score":>12} {"分割点位置":>11} {"dip_ratio":>11} {"低簇质量":>9}')
+    for a in ARMS:
+        v = cell(a, ss)
+        loc = cell(a, sa)
+        print(f"  {a:<6} {v.mean():>12.4f} {np.nanmean(loc):>11.3f} {cell(a, dr).mean():>11.4f} "
+              f"{cell(a, lambda d: np.array(d['bin_n'], float)[CTR < 0.35].sum() / max(np.array(d['bin_n'], float).sum(), 1)).mean():>9.4f}")
 
-print()
-print("=" * 88)
-print("关键检验：§13.2 说 T15 其实也有隔开的少数簇，而 dip_ratio 对它瞎了。split_score 看得见吗？")
-print("=" * 88)
-t15, n15 = cell("T15", ss), cell("N15", ss)
-d = t15 - n15
-print(f"  T15 = {t15.mean():.4f}   N15 = {n15.mean():.4f}   差 = {d.mean():+.4f}   "
-      f"{int((d > 0).sum())}/12 为正   p={wilcoxon(t15, n15).pvalue:.5f}")
-print(f"  同一对在 dip_ratio 上：T15 = {cell('T15', dr).mean():.4f}  N15 = {cell('N15', dr).mean():.4f}"
-      f"   差 = {(cell('T15', dr) - cell('N15', dr)).mean():+.4f}  "
-      f"p={wilcoxon(cell('T15', dr), cell('N15', dr)).pvalue:.5f}")
-print("  ⇒ split_score 若在这里显著而 dip_ratio 不显著，就证实了 §13.2 的诊断，")
-print("     并说明 dip_ratio 把「T15 没分裂」这件事读错了。")
+    print()
+    print("=" * 88)
+    print("关键检验：§13.2 说 T15 其实也有隔开的少数簇，而 dip_ratio 对它瞎了。split_score 看得见吗？")
+    print("=" * 88)
+    t15, n15 = cell("T15", ss), cell("N15", ss)
+    d = t15 - n15
+    print(f"  T15 = {t15.mean():.4f}   N15 = {n15.mean():.4f}   差 = {d.mean():+.4f}   "
+          f"{int((d > 0).sum())}/12 为正   p={wilcoxon(t15, n15).pvalue:.5f}")
+    print(f"  同一对在 dip_ratio 上：T15 = {cell('T15', dr).mean():.4f}  N15 = {cell('N15', dr).mean():.4f}"
+          f"   差 = {(cell('T15', dr) - cell('N15', dr)).mean():+.4f}  "
+          f"p={wilcoxon(cell('T15', dr), cell('N15', dr)).pvalue:.5f}")
+    print("  ⇒ split_score 若在这里显著而 dip_ratio 不显著，就证实了 §13.2 的诊断，")
+    print("     并说明 dip_ratio 把「T15 没分裂」这件事读错了。")
 
-print()
-print("=" * 88)
-print("主判据的交互项，两个统计量各算一遍")
-print("=" * 88)
-NOISE_ARMS = ["N15", "T15", "N05", "N05m"]
-for name, fn in (("split_score", ss), ("dip_ratio", dr)):
-    x = cell("T05", fn) - cell("N05", fn)
-    y = cell("T15", fn) - cell("N15", fn)
-    dd = x - y
-    w = np.concatenate([np.array([np.std([fn(R[(a, s, r)]) for r in (1, 2)], ddof=1)
-                                  for s in S]) for a in NOISE_ARMS])
-    sw = float(np.sqrt((w ** 2).mean()))
-    ub = sw * math.sqrt(len(w) / chi2.ppf(0.10, len(w)))
-    noise = 2 * ub / math.sqrt(2)
-    emp = float(dd.std(ddof=1))
-    print(f"  {name:<12} 交互 {dd.mean():>+8.4f}  {int((dd > 0).sum())}+/12  "
-          f"p={wilcoxon(x, y).pvalue:.5f}  比值(预注册口径) {dd.mean() / noise:+.2f}  "
-          f"比值(经验 SD {emp:.4f}) {dd.mean() / emp:+.2f}")
-print("\n  注：`split_score` 的方向预测是**正**（分裂 ⇒ 分数升高），`dip_ratio` 是负。")
+    print()
+    print("=" * 88)
+    print("主判据的交互项，两个统计量各算一遍")
+    print("=" * 88)
+    NOISE_ARMS = ["N15", "T15", "N05", "N05m"]
+    for name, fn in (("split_score", ss), ("dip_ratio", dr)):
+        x = cell("T05", fn) - cell("N05", fn)
+        y = cell("T15", fn) - cell("N15", fn)
+        dd = x - y
+        w = np.concatenate([np.array([np.std([fn(R[(a, s, r)]) for r in (1, 2)], ddof=1)
+                                      for s in S]) for a in NOISE_ARMS])
+        sw = float(np.sqrt((w ** 2).mean()))
+        ub = sw * math.sqrt(len(w) / chi2.ppf(0.10, len(w)))
+        noise = 2 * ub / math.sqrt(2)
+        emp = float(dd.std(ddof=1))
+        print(f"  {name:<12} 交互 {dd.mean():>+8.4f}  {int((dd > 0).sum())}+/12  "
+              f"p={wilcoxon(x, y).pvalue:.5f}  比值(预注册口径) {dd.mean() / noise:+.2f}  "
+              f"比值(经验 SD {emp:.4f}) {dd.mean() / emp:+.2f}")
+    print("\n  注：`split_score` 的方向预测是**正**（分裂 ⇒ 分数升高），`dip_ratio` 是负。")
