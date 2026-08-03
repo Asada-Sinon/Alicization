@@ -154,6 +154,11 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
     for g in ("population", "carnivore_frac", "carn_speed", "herb_speed",
               "frugivory_frac", "graze_gain", "fruit_gain"):
         out[g] = row.get(g, float("nan"))
+    # `population` 的**窗口时均**，而不是末帧瞬时值。实测格内 σ_W = 1286 而臂均只有 2355
+    # （55%！），那不是世界的噪声，是**捕食者—猎物振荡的相位**：末帧取在波峰还是波谷全凭
+    # 运气。按瞬时值定的 2 SE 容差是 ±3637，连 +18.7% 的真效应都破不了——护栏形同虚设。
+    # `pops` 已经把整个采样窗都累了，取均值即可，零额外成本。
+    out["population_mean"] = float(np.mean(pops)) if pops else float("nan")
 
     print(f"样本 {len(p)} 个体·快照（{SAMPLE_STEPS // SAMPLE_EVERY} 帧 × 平均 "
           f"{len(p) * SAMPLE_EVERY // SAMPLE_STEPS} 食草者）")
