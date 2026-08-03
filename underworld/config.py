@@ -222,6 +222,27 @@ class Config:
     # pure gain that would peg at an extreme. gene=0 -> pref=0.5 -> UNBIASED: both
     # multipliers are exactly 1, so a fresh population forages both layers as before
     # and any partitioning is evolved, not seeded (the clean baseline, like escape=0).
+    forage_curvature: float = 1.0    # SHAPE of the tradeoff frontier -- and the term
+    #                                  that decides whether disruptive selection is
+    #                                  even possible. `grass**k + fruit**k = 2`:
+    #                                  k=1 is today's straight line (bit-exact, the
+    #                                  branch is skipped), k<1 bows the frontier toward
+    #                                  the origin so specialists beat the linear
+    #                                  interpolation, k>1 bows it away and favours
+    #                                  generalists.
+    #
+    #                                  Why it exists: a STRAIGHT frontier contributes
+    #                                  exactly zero curvature to invasion fitness --
+    #                                  W(s) = A*grass(s) + B*fruit(s) is linear in s
+    #                                  for every A, B -- so the intermediate can never
+    #                                  be a fitness minimum from the tradeoff alone,
+    #                                  no matter what the fruit layer's share is or how
+    #                                  mating is structured. Five archived negatives
+    #                                  share that one cause (docs/
+    #                                  multispecies_feasibility.md §11). k<1 is the
+    #                                  only setting that puts curvature into the
+    #                                  first-order term instead of hoping second-order
+    #                                  ecology supplies it.
     forage_tradeoff: float = 0.0     # STRENGTH of the tradeoff, and its master switch.
     #                                  At 0.0 (default) the forage_pref gene has ZERO
     #                                  effect on grazing -- both grass and fruit

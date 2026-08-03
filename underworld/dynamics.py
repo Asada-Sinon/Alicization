@@ -49,10 +49,53 @@ def _forage_pref_scale(state: WorldState, cfg: Config):
     from the trace and grazing is bit-exact the pre-gene kernel (same compile-time-gate
     convention as `_forage_heat_scale`/fear/day-night). The clip guards t>1; at the
     documented t=0.5 the multipliers stay in [0.5, 1.5] and never reach it.
+
+    ## `forage_curvature`: the sum-to-2 line is exactly the knife edge
+
+    "The two ALWAYS sum to 2" is a straight-line trade-off frontier, and a straight
+    frontier contributes EXACTLY ZERO curvature to invasion fitness. Write the
+    realised fitness as `W(s) = A*grass(s) + B*fruit(s)` for whatever per-unit
+    returns `A`, `B` the frequency-dependent ecology settles on; with both
+    multipliers linear in `s`, `W = (A+B) + t*s*(A-B)` and `d2W/ds2 == 0` for every
+    `A`, `B`. So the intermediate can never be a fitness *minimum* from the trade-off
+    alone -- disruptive selection has no first-order term to come from, whatever the
+    fruit layer's share, whatever the mating structure. That one line of algebra is
+    the common cause behind five archived negatives (§9.6 variance collapse, §9.10
+    and §9.11 no divergence window over five doses, §11, §12, and R9's cline);
+    docs/multispecies_feasibility.md §11.
+
+    `forage_curvature = k` rescales both multipliers onto the frontier
+    `grass**k + fruit**k = 2`, which is the standard Levins fitness-set knob:
+
+        k = 1  -- today's straight line. Bit-exact: the branch is skipped outright.
+        k < 1  -- frontier bows TOWARD the origin, so a specialist gets more than the
+                  linear interpolation (at k=0.5, t=1 a full specialist reaches 3.83
+                  against a generalist's 1.0). Generalist becomes a fitness minimum:
+                  this is the only setting that can produce disruptive selection.
+        k > 1  -- frontier bows away, generalists gain. Wrong direction; supported
+                  only so the dose curve can be run through the knife edge.
+
+    Note k<1 necessarily raises TOTAL intake for specialists -- that is not a side
+    effect to normalise away, it is the definition of a convex trade-off. The
+    unbiased forager (`s=0`) is unchanged at `(1, 1)` for every `k`, so the starting
+    world is identical and any rise in total flux is a *consequence* of specialising,
+    not an imposed subsidy. It still has to be watched: docs/experiments.md §5's
+    "more food just becomes more bodies" applies to whatever the population evolves
+    into, so `population` and total flux are guardrails, not free variables.
     """
     s = 2.0 * forage_pref_of(state.genome, cfg) - 1.0
     grass = jnp.clip(1.0 + cfg.forage_tradeoff * s, 0.0, None)
     fruit = jnp.clip(1.0 - cfg.forage_tradeoff * s, 0.0, None)
+    if cfg.forage_curvature != 1.0:
+        k = cfg.forage_curvature
+        # Rescale (grass, fruit) along its own ray onto `g**k + f**k = 2`. The ray
+        # keeps the gene's meaning (which layer, and how hard) and moves only how
+        # much a given degree of specialisation is worth. eps guards the k<1 pole at
+        # a full specialist, where the other multiplier is exactly 0 and 0**k is fine
+        # but the sum could underflow for large k.
+        norm = jnp.power(grass, k) + jnp.power(fruit, k)
+        c = jnp.power(2.0 / jnp.maximum(norm, 1e-12), 1.0 / k)
+        grass, fruit = grass * c, fruit * c
     return grass, fruit
 
 
