@@ -28,6 +28,51 @@
 
 ---
 
+## Session 2026-08-03（用户拍板的两件事，`/loop` 自主执行）
+
+- 授权: 用户拍板执行两件、要求**照着已写好的计划做不要重新设计**、判决派 `result-analyst`、
+  撞到要拍板的岔路写进 PENDING 并跳过不要停、做完一件就提交推送。
+
+- **① 统计协议升级 —— 完成并推送**（`2e49b8b` / `33a37d4` / `f46846a`）
+  - 协议 **6 配对种子 → 12 种子 × 2 重复**。三条分析口径（格均值 → 效应/噪声比 → 护栏容差
+    对着 `√2·σ̂_W` 定）写进 `CLAUDE.md`、`conventions.md §5`、`TODO.md`、`/exp` skill，
+    以及**环路上其余六份 agent/skill**（只改 §7.2 那五处落不了地——真正下判决的是
+    `result-analyst`，它整节还是旧协议）。
+  - **实现收进 `scripts/exp_stats.py`**（三条口径的唯一实现，写新 `analyze.py` 时 import 它）。
+    回归验收 `explorations/20260803-partition/verify_exp_stats.py` 用 90 个历史 log 复算 P4，
+    与 §9.11 已发表的每个数逐位一致。**改这个库后必须重跑它。**
+  - 途中修了自己一个错：功效函数第一版拿「全部种子同向」的概率解样本量，那个概率随 n
+    **下降**，于是小效应报出更少种子。已改成配对 Wilcoxon 精确零分布做蒙特卡洛。
+
+- **② 把果层挪出共居带 —— A、B 两阶段完成，C 待跑**
+  - **A 判决（§12.3.A'，48 run）：我预注册的猜想被自己的数据推翻。** 默认世界里重叠是
+    **纯几何**的（`sel_ratio_water` 1.009，p=0.151，CI 含 0），但在**厚果层世界里是行为性的
+    且很强**（**3.712**，12/12，p=0.00049，效应/噪声 **8.73**）。**C/D 的基线因此固定为
+    `niche` 臂**——`base` 的「可下降空间 ÷ MDE」只有 0.52，手术做对了也测不出来。
+  - **B 落地（§12.3.B）：`fruit_dry_weight` 旋钮已装**，默认 0、bit-exact、golden 未动、
+    单测 11 项绿。**装的时候拦下一个会毁掉 C/D 归因的混杂**：朝干旱带 blend 会把果层总承载
+    抬 **+91%**（`forest²` 窄带再平方到处都小，`dry` 在四分之一张图上饱和），已加容量归一化
+    做成等量再分配。§12.4 风险 3（果层碎裂）**没有发生**（有效格 792→726）。
+
+- **PENDING（下次第一件事）**: 跑 **C 阶段单种子定标探针**，在 **`niche` 配置上**扫
+  `fruit_dry_weight × fruit_dry_d0`，找「分离了但果实还吃得到」的工作点。判据容差直接抄
+  §12.3.A' 那张表。**读数从三个扩到五个**：`sel_ratio_water` + `frugivory_frac` +
+  `fruit_cells_eff` + `herb_water_dist` + `death_thirst_frac`（后两个是 A 判决新增的）。
+
+- **坑（都会咬人）**:
+  - **sweep 跑的时候绝不能改 `underworld/`**——sweep 是逐批启动进程的，改了后面几批会加载到
+    不同的代码，而且不会有任何报错。
+  - **`carnivore_frac` 的 2×噪声占基线 71%、`population` 在 niche 世界 `σ_B=0`**——
+    **C 的单种子探针只能读「有没有塌到 0」，不能读「有没有变差」**。
+  - **主口径 `sel_ratio_water` 的零模型用的是处理后变量**（实测个体自己的水距分布），
+    所以它回答不了「种群有没有离开河岸」，那个必须另读 `herb_water_dist`。
+  - **48 个 run 全在同一张地图上**，A 的全部结论都是空间性的 → **§12.3 E 的跨地形交叉是
+    必须的，不是可选的**。
+  - 终端刷屏会把 `ghostty` 刷到 80%+ CPU，进而把 `check.py --full` 从 256s 拖到 10 分钟以上
+    （套件是**主机 CPU 编译**瓶颈）。长输出一律重定向到文件。
+
+---
+
 ## Session 2026-08-02→03（夜间自主，用户睡前授权：局部多物种生态箱 + 可视化）
 
 - 授权: 用户定盘长期目标「**局部的多物种生态箱演化 + 可视化结果**」，要求**先把工作流设计成
@@ -145,37 +190,3 @@
   - **6 并发 sweep ~27min**（36 run×~4.5min/6 并发）——不是卡住。诊断 CPU 回落坑三连：`nvidia-smi` 看 util/NVML、
     `ps` 看 CPU 时间是否暴涨、log 看 steps/s。本轮 GPU util 100%、驱动 580.173 一致，正常。
   - forage 是**唯一付永久 trait_dim 代价却被证否**的改动，选择留档（回退 8→7 会再 churn golden+作废种群）。
-
-## Session 2026-07-25（夜间自主，用户睡前授权）
-
-- 授权: 用户睡前给自主授权（见 `memory/overnight-autonomous-mandate.md`），一切调研+实验落报告、
-  选最优拍板提交推送。做了两大块：**防御性状**（先）+ **食草过多/多物种**（后）。全部已 push。
-- 完成（防御性状线）:
-  - **armor 演化验证 ✅**（6 种子）：herb_armor ON 0.170 vs 漂变 0.067，6/6，p=0.031——本项目第一个
-    真正演化出来的可见形态防御。可视化：厚皮深描边/尖刺放射纹/中毒染绿 + inspector 行（wire v8/v9）。
-  - **尖刺重设计**（进攻/防御双用 + venom 场，`04d18e7`）：6 种子判决——**进攻侧盘活**（carn_spike
-    ON 0.202 vs OFF 0.052，6/6，p=0.031，相对旧设计 10.6×）；**防御侧仍未活**（herb_spike 贴漂变，
-    venom 毒发时猎物已死、收益回退亲缘）。
-- 完成（食草过多/多物种线）:
-  - **食草"满山遍野"判决**（`45fd1d2`）：**四条降密度杠杆全部失败**（repro_threshold/L6 密度制约=
-    水限补偿；紧水=灭捕食者+渴死回潮；carn_cost↓=食草水限压不动）。根因水限+密度尺度不变。诚实建议
-    **承认刻意压缩微缩世界、不改默认**。`docs/herbivore_overpopulation.md`。
-  - **L6 密度制约繁殖**（`bd8107f`，默认关）+ **腐食通路 carrion/scavenge**（`37dda74`，默认关）落地。
-    **腐食 6 种子验证（run_id 20260725-carrion）：机制通过但抗灭绝假设未证实**——carrion_total 0→204
-    （6/6），carn_frac 均值 0.127→0.168 但仅 4/6、p=0.31、min 不升；护栏守住（渴死略降）。诊断：食肉者
-    踩到才吃、不主动找尸体（首版不接 retina），补贴太稀薄。**默认保持关闭**（`multispecies_feasibility.md`
-    §7）。
-  - **三份调研报告**（`3fbf660`）：`herbivore_overpopulation.md`、`multispecies_ecology.md`（13 篇真实
-    引用）、`multispecies_feasibility.md`。
-- PENDING（下个 session 第一件事）: 用户列的 **#4 多性状** 与 **#5 种间合作** 尚未动手（只调研了）。
-  候选（研究已备）：①放大腐食效应——把 carrion 折进 food retina 让食肉者**主动找尸体**（动 in_dim、
-  作废全脑）或加 `scavenge` trait 做真·腐食者物种；②#5 种间合作脚手架=**共享报警场**（让猎物也往 fear
-  沉积、附近异种可读，Quinn 模式，见 `multispecies_ecology.md §5`）；③#3 资源分割第二食草者（草↔果
-  权衡基因，最省）。**都要 6 种子、默认关保 golden。**
-- 坑:
-  - **教训**：跑实验前先提交（Experiment D 在脏树上跑，provenance HEAD 与实际码不符）。已进 MEMORY。
-  - **ssh-agent 死了**：`git push` 默认失败，用 `GIT_SSH_COMMAND="ssh -o BatchMode=yes" git push` 绕过
-    （config 的 IdentityFile 直接可用）。
-  - 新增默认关旋钮：`density_repro_penalty=0`（L6）、`carrion_enabled=False`（腐食）——都 bit-exact 旧
-    世界、golden 未动。armor/spike/venom 是 trait_dim 5→7 + venom 场，golden 已按那些重 bless。
-  - `.venv` 外的 `python3` 也被 PREALLOCATE hook 拦——纯 JSON 解析脚本也要加 `XLA_PYTHON_CLIENT_PREALLOCATE=false` 前缀。
