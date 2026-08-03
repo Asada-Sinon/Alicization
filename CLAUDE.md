@@ -326,12 +326,29 @@ run-to-run variance exceeds most parameter effects: a config that looked clearly
 best on one seed scored 0% carnivores on all four seeds tested, while one that
 looked clearly worst averaged 2%+. The entire first-pass conclusion was noise.
 
-**Six seeds paired, or five per arm unpaired — three is below the floor**, because
-a 3-vs-3 test cannot reach p=0.05 whatever the data. Report per-seed numbers, not
-just the mean (`--json` emits them). Prefer Mann-Whitney or paired Wilcoxon with
-an effect size and a bootstrap interval, and do not Bonferroni-correct — report
-every p-value you computed. The arithmetic, and the ~21 paired seeds a 0.02
-`inland_frac` shift actually needs: `docs/conventions.md` §5.
+**Twelve seeds × two repeats per cell — that is the protocol, and six seeds was
+below the floor.** Two independent reasons, neither about precision: the smallest
+two-sided p a paired signed-rank test can *reach* is `2/2ⁿ`, so n=6 tops out at
+**0.031** — which is why this project's conclusions kept landing on exactly that
+number — while n=12 reaches 0.00049; and `terrain.build(cfg)` takes no RNG, so a
+seed is the only thing that buys a fresh founder draw, whereas a repeat buys none.
+Repeats earn their place for one thing only: they let a run estimate its *own*
+noise instead of citing an archived number.
+
+Analyse it in this order, and never skip a step: **average the `r` repeats into a
+cell mean first, then run the paired test on the `s` cell means** — treating
+`s×r` runs as `s×r` independent samples is wrong, since repeats are the same seed
+re-run and carry only chaos. **Always report effect ÷ paired-difference noise**,
+where noise is `√2·σ̂_W/√r` self-estimated from this experiment's within-cell
+spread; a ratio below 1 is flagged underpowered *even when p clears*. And **size
+guardrail tolerances against `√2·σ̂_W`**, never by intuition — ±10% or +5pp is
+about one noise SD, so a zero effect trips it routinely.
+
+Report per-seed numbers, not just the mean (`--json` emits them), and do not
+Bonferroni-correct — report every p-value you computed. `scripts/exp_stats.py` is
+the shared implementation of all of the above; import it rather than re-deriving
+the arithmetic per round. Why the protocol changed, and the variance decomposition
+behind it: `docs/run_to_run_variance.md` §7 (power arithmetic: `docs/conventions.md` §5).
 
 **Seeds vary the founders, not the world.** `terrain.build(cfg)` uses no RNG, so
 every seed runs on the *same map*. Any spatial claim therefore generalises to

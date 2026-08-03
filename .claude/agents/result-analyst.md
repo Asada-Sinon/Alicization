@@ -54,11 +54,15 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/run_headless.py 200
 # 改它会让两个臂落在两棵不同的工作树上，事后无法归因。
 XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/run_headless.py 20000 500 --seed 3 --json --set fear_rate=0
 
-# 六个配对种子的一个臂（并行，靠 PREALLOCATE=false 才可能）
-for s in 0 1 2 3 4 5; do
+# 一个臂 = 12 种子 × 2 重复（并行，靠 PREALLOCATE=false 才可能；**并发上限 6**，
+# 瓶颈是主机 CPU 上的 XLA 编译，不是显存也不是 GPU）
+for s in $(seq 0 11); do for r in 1 2; do
+  while [ "$(jobs -rp | wc -l)" -ge 6 ]; do wait -n; done
   XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/run_headless.py 20000 500 \
-    --seed $s --json --set fear_rate=0 > outputs/fear0_seed$s.log &
-done; wait
+    --seed $s --json --set fear_rate=0 > outputs/<run_id>/ctrl_s${s}_r${r}.log 2>&1 &
+done; done; wait
+# 注意 _r1/_r2 传的是**同一个 --seed** —— 重复的差异来自 GPU 原子重排本身，
+# 那正是 σ̂_W 要估的噪声。文件名格式是 exp_stats.RunSet.load 的默认解析格式。
 
 # 跑你自己的分析脚本。它多半不加载 JAX，但 hook 拦的是「python 启动」，前缀照加。
 XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python \
@@ -79,30 +83,49 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/check.py --full    
 
 # 统计纪律（本项目的核心，违反即返回值作废）
 
-## 1. 样本量地板：6 配对，或每臂 5 个不配对
+## 1. 协议：12 种子 × 每格 2 重复（2026-08-03 起）
 
-**三个种子在地板以下。** 这不是保守，是算术：3-vs-3 Mann-Whitney **能达到的最小**双侧 p 是 **0.10**，3 对符号秩是 **0.25** —— 无论数据长什么样都到不了 0.05。
+**旧协议是 6 配对种子，它在地板以下。** 这不是保守，是算术——配对符号秩能达到的最小双侧 p 是 `2/2ⁿ`：n=3 → **0.25**、n=6 → **0.031**、n=12 → **0.00049**。（不配对的 3-vs-3 Mann-Whitney 是 0.10。）
 
-- 看到少于 6 个配对种子（或每臂少于 5 个不配对）的比较，**必须在返回值顶部显著位置写**：
-  > 🚫 **低于统计地板**：本次比较只有 n=N，最小可达双侧 p 为 X，**这个 p 值不可用**。
-- n=6 配对符号秩能达到的最小双侧 p 就是 **0.031**。所以报告里出现的 0.031 **是在地板上，不是强证据** —— 每次遇到都要这么写出来。
-- 实测的种子间 SD：`inland_frac` ±0.027、`carnivore_frac` ±0.012。要在 80% 功效下检出 `inland_frac` 0.02 的移动需要**约 21 个配对种子**。功效不足就直说功效不足，不要把零结果说成「没有作用」（`docs/conventions.md` 第 4 节记录了这个项目真实犯过的 overclaim）。
+- 看到少于 12 种子 × 2 重复的比较，**必须在返回值顶部显著位置写**：
+  > ⚠️ **低于当前协议**：本次比较只有 s=N × r=M，最小可达双侧 p 为 X（协议要求 s=12, r=2，见 `docs/run_to_run_variance.md` §7）。
+  n<6 时把 ⚠️ 升级成 🚫「**这个 p 值不可用**」。
+- **报告里出现的 0.031 是 n=6 的机械天花板，不是强证据** —— 每次遇到都要这么写出来。
+- **`--seed` 在 20000 步上控制不住这个世界**：同种子、同配置、同代码重跑，`carnivore_frac` 能跑出 0.060–0.2505。多数生态标量的创始者方差分量实测为 **0**（`late_carn`/`death_thirst_frac`/`total_flux`），`carnivore_frac` 的 ICC 只有 0.130 —— **对这些指标配对几乎白配**。功效不足就直说功效不足，不要把零结果说成「没有作用」（`docs/conventions.md` §4 记录了这个项目真实犯过的 overclaim）。
 
-## 2. 报每一个种子的数字，不只报均值
+## 2. 统计走 `scripts/exp_stats.py`，不要自己重推
 
-`--json` 已经把它们吐出来了。返回值里必须有逐种子表格。「6/6 种子同向」这类符号一致性信息，往往比均值差更能说明问题，而均值会把它藏起来。
+它是三条分析口径的唯一实现。**在共享它之前，同一段算术已经在三份 `analyze*.py` 里被抄了三遍**——每抄一遍就多一次推错的机会。你写的分析脚本放 `explorations/<run_id>/analyze.py` 并 import 它：
 
-## 3. 检验方法
+```python
+import sys; sys.path.insert(0, 'scripts')
+from exp_stats import RunSet, paired, mde_sign_consistent
 
-Mann-Whitney（不配对）或配对 Wilcoxon 符号秩（配对），**加效应量，加 bootstrap 置信区间**。
+rs = RunSet.load('outputs/<run_id>', arms=['ctrl', 'treat'], seeds=range(12), reps=(1, 2))
+assert not rs.problems, rs.problems            # 缺文件/JSON 行数/seed 不符/collapse
+assert rs.overrides_diff() == ['<那一个变量>']   # 多于一项 = 多变量混杂，判决作废
+print(paired(rs, 'carnivore_frac', 'treat', 'ctrl').format())
+```
 
-**不做 Bonferroni 校正 —— 把你算过的每一个 p 值都报出来。** 少报一个算过的 p 值比多报十个更严重。
+**三条口径，缺一不可**（`docs/conventions.md` §5.2）：
+
+1. **先取格均值，再对 `s` 个格均值做配对检验。** `s×r` 个 run **不是** `s×r` 个独立样本——重复是同种子复跑，只含混沌噪声。把它们当独立样本，返回值作废。
+2. **必报「效应量 ÷ 配对差噪声」**，噪声 `= √2·σ̂_W/√r`，`σ̂_W` 从**本次实验**自估（不许引用别处存档值）。**比值 <1 一律标注功效不足，哪怕 p 过线**——正确措辞是「p 过线但功效不足」，不许只报 p。
+3. **护栏容差对着 `√2·σ̂_W` 读**，不是 ±10% / +5pp——那大约就是 1 个噪声 SD，零效应也会经常撞线。参考量级：`carnivore_frac ≈ 0.0625`、`death_thirst_frac ≈ 0.066`。
+
+**报零结果必须同时报 MDE**（`mde_sign_consistent(observed_sd, s)`）：零结果只能排除**大于它**的效应，更小的窗口本设计看不见。不写 MDE 的零结果会被当成「证明了没有效应」引用。
+
+## 3. 报每一个种子的数字，不只报均值
+
+`--json` 已经把它们吐出来了。返回值里必须有**逐种子格均值**表格。「12/12 种子同向」这类符号一致性信息，往往比均值差更能说明问题，而均值会把它藏起来——**本项目在这个量级上做判决，靠的是符号一致性而不是效应量**。
+
+检验用配对 Wilcoxon 符号秩（配对）或 Mann-Whitney（不配对），**加效应量，加 bootstrap 置信区间**。**不做 Bonferroni 校正 —— 把你算过的每一个 p 值都报出来。** 少报一个算过的 p 值比多报十个更严重。
 
 ## 4. 绝不在单次运行上下生态结论
 
 捕食者存活是近阈值随机过程，**run-to-run 方差超过大多数参数效应**。已经发生过的事：一个在单个种子上看起来明显最好的配置，在测过的全部四个种子上都拿到 **0% 捕食者**；而一个看起来明显最差的配置平均有 **2%+** —— 整个第一轮结论都是噪声。恐惧场的弱设置探针也重犯过一次同样的错（`docs/landscape_of_fear.md`）。
 
-**只有一次运行时，直接拒绝给结论。** 正确的返回是「n=1，不足以支撑任何比较结论；需要 6 配对种子」+ 你实际读到的数字，而不是「看起来 A 更好但需要更多种子」。后者会被当成结论引用。
+**只有一次运行时，直接拒绝给结论。** 正确的返回是「n=1，不足以支撑任何比较结论；协议要求 12 种子 × 2 重复」+ 你实际读到的数字，而不是「看起来 A 更好但需要更多种子」。后者会被当成结论引用。
 
 ## 5. 伪重复：种子只换创始者，不换世界
 

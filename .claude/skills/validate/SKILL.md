@@ -117,7 +117,7 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/check.py
 ## 硬约束
 
 - 不要在本 skill 里动手改代码。验收和修复分开，混在一起就没人能审了。
-- **不做数值判断。** 「这个改动让捕食者占比变差了」这种结论必须来自 /exp 的 6 配对种子
+- **不做数值判断。** 「这个改动让捕食者占比变差了」这种结论必须来自 /exp 的 12 种子 × 2 重复
   实测，不能靠读 diff 推断，也不能靠一次 `run_headless.py` ——单次运行的方差超过大多数
-  参数效应（`CLAUDE.md`「绝不在单次运行上调生态参数」）。
+  参数效应，而且**重跑同一个种子和换种子吵得差不多**（`docs/run_to_run_variance.md`）。
 - 用户明确说过「不管这个」的，不要再报第二次（去 `MEMORY.md` 查 `[LEARN:tag]`）。

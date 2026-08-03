@@ -291,3 +291,37 @@ SE = σ_W · √( 2 / (s · r) )
 - 任意起一个新实验，只读 `/exp` skill 就会**自动**跑 12×2 并报效应/噪声比。
 - `CLAUDE.md` / `conventions.md` / `TODO.md` 三处的统计口径互相不打架。
 - 旧结论**不回头重跑**（§6 已按「效应量/噪声」比值逐条标注，那就是它们现在的可信度）。
+
+### 7.4 落地记录（2026-08-03 完成）
+
+| # | 文件 | 状态 |
+| --- | --- | --- |
+| 1 | `.claude/skills/exp/SKILL.md` | ✅ 第 2 步整节重写为 §2.1 协议 / §2.2 三条口径 / §2.3 其余四条；第 1 步判据模板加「护栏与容差」字段；第 4 步 sweep 示例改 12×2 + 并发上限 6 + `{arm}_s{seed}_r{rep}.log` 命名；第 5 步要求 result-analyst 走共享库；硬约束加 4b |
+| 2 | `CLAUDE.md` | ✅ 统计段重写，含三条口径与 `exp_stats.py` 指针 |
+| 3 | `docs/conventions.md` §5 | ✅ 重写为 §5「地板算术 + 为什么加种子不加重复」/ §5.1「原功效算术错在用了跨种子 SD」/ §5.2「每次判决必报三件事」；§9.1 末尾「尚未生效」改为「已生效」 |
+| 4 | `scripts/exp_stats.py` | ✅ 新建。`RunSet.load/cell_means/pooled_within_sd/pair_noise/overrides_diff`、`paired()→PairedResult`（含 `.ratio`/`.underpowered`/`.at_floor`/`.format()`）、`bootstrap_ci`、`mde_sign_consistent`、`power_paired_wilcoxon`、`required_seeds`、`wilcoxon_p_floor` |
+| 5 | `docs/TODO.md` | ✅ 硬约束一节改为新协议 |
+| + | 环路上的其余 agent/skill | ✅ `result-analyst.md`（§1–§4 重写，它才是真正下判决的那个）、`plan-critic.md`（P-3 检查项）、`claim-verifier.md`（区分新旧协议，不追溯判旧结论为假）、`plan/impl/validate/kick` 各一处 |
+
+**一处对计划的偏离，写下来别事后解释**：§7.2 第 4 项要求「每轮的
+`explorations/<run>/analyze.py` 改为 import 它」。**已落地的三份历史脚本没有改**——
+它们是 §9.6/§9.10/§9.11 已发表数字的 provenance，重写它们等于毁掉「这些数字由这段代码
+算出」这一事实。改为新增
+**`explorations/20260803-partition/verify_exp_stats.py`**：用共享库从同一批 90 个 log
+重算 P4，把 §9.11 印着的每个数硬编码成期望值逐位核对。**验收已通过**——五点臂均值、
+四组配对差与 p、同向种子数、N−L 的 CI、剔除 seed 0 后翻正的 +0.00440、效应/噪声比 0.62、
+实测/预测 0.51、两个 MDE 百分比、五臂 bimodality 计数、三个 Friedman p、30/30 护栏格，
+**无一处不符**。「import 它」这条规矩对**今后**的 `analyze.py` 生效，已写进
+`/exp` 第 5 步与 `result-analyst.md` §2。
+
+**改动 `exp_stats.py` 后必须重跑该验收脚本**：
+
+```bash
+XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python \
+  explorations/20260803-partition/verify_exp_stats.py
+```
+
+**一处实现选择**：`bootstrap_ci` 默认每次调用起一个新的 `default_rng(20260803)`，而
+`analyze_curve.py` 当年是全脚本共享一个生成器。这让 CI **与调用顺序无关**（在上面插一段
+分析不会改动下面的数），代价是与历史脚本的抽样序列不同——B=20000 下百分位足够稳，
+两边在已发表的位数上一致（如 N−L 的 `[+0.005, +0.021]`）。
