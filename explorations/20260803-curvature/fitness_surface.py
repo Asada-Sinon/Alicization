@@ -40,6 +40,7 @@
 import argparse
 import dataclasses
 import json
+import math
 import sys
 
 sys.path.insert(0, ".")
@@ -122,6 +123,31 @@ def main(steps: int, seed: int, overrides: dict, as_json: bool) -> None:
         out["bimodality_coefficient"] = float(bimodality_coefficient(last.astype(np.float64)))
         t = blrt_two_components(last.astype(np.float64), n_boot=199, seed=seed)
         out["blrt_lr_per_n"] = t["lr_per_n"]
+    # --- dip_ratio：把「真分裂」和「整体移走」分开 ---
+    #
+    # **为什么不用 frac_mid（中间带 [0.40,0.60] 的占比）**：饱和探针里 S1（真分裂）读 0.0006、
+    # S2（只是右移）读 0.058——两者都近乎空，`frac_mid` **分不出**它们。图看出来的：
+    # S2 是整个分布移到 0.70 去了，中间带因此空；S1 是中间真的裂开。
+    #
+    # `dip_ratio` = 实测中间带占比 ÷ **同均值同 sd 的高斯**在该带上的期望质量。
+    # 位置与尺度都被除掉了：任何单峰分布读 ~1，真分裂读 ~0。实测 S0 1.049 / S1 0.0031 /
+    # S2 0.862——`S0` 那个 1.049 是它自带的估计量对照（构造上单峰必须读 1）。
+    # 均值与 sd 都取自**占据分布本身**，与分子同源，不用末帧的 `sd`（那是另一个量）。
+    from scipy.stats import norm as _norm
+    _n = np.array(n, float)
+    _n = _n / max(_n.sum(), 1.0)
+    _mid = (ctr >= 0.40) & (ctr <= 0.60)
+    _m = float((_n * ctr).sum())
+    _sd = math.sqrt(max(float((_n * (ctr - _m) ** 2).sum()), 1e-12))
+    _obs = float(_n[_mid].sum())
+    _exp = float(_norm.cdf(0.60, _m, _sd) - _norm.cdf(0.40, _m, _sd))
+    out["frac_mid"] = _obs
+    out["dip_ratio"] = _obs / max(_exp, 1e-9)
+    out["occ_mean"] = _m
+    out["occ_sd"] = _sd
+    print(f"  dip_ratio = {out['dip_ratio']:.4f}  (中间带实测 {_obs:.4f} ÷ 同均值同sd高斯期望 "
+          f"{_exp:.4f})  ⇒ {'**真分裂**' if out['dip_ratio'] < 0.3 else '单峰'}")
+
     total = max(sum(toll.values()), 1.0)
     out.update({f"death_{k}_frac": toll[k] / total for k in CAUSES})
     out["min_pop"] = float(np.min(pops)) if pops else float("nan")
