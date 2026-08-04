@@ -8,6 +8,13 @@
   const HEADER_BYTES = 72;       // protocol v10 (forage appended to agent record; header unchanged)
   const PICK_RADIUS = 6.0;       // world units
   const HIST = 600;              // samples kept per series (~20s at 30fps)
+  // CONTRACT: the foraging histogram must use the same binning as the analysis
+  // scripts (explorations/20260804-readouts/neutral_null.py:hist_of and
+  // trajectory.py:BINS = np.linspace(0.0, 1.0, 21)), i.e. 20 equal bins over the
+  // full [0,1] range with the ends CLIPPED rather than dropped. If the panel and
+  // the analysis disagree, the thing on screen is not the thing in the verdict.
+  const EC_BINS = 20;
+  const EC_LOW = 7;              // bins 0..6 are pref < 0.35, the `low_mass` cut
 
   // Series colours, validated as a set (all six dataviz checks pass on the
   // --stone surface). herb/carn are the diet species colours locked to render.js's
@@ -36,7 +43,7 @@
     "sp_pop", "sp_carn", "sp_std", "sp_plant", "sp_vel", "sp_forest",
     "sigilcap", "sv_pop", "sv_carn", "sv_std", "sv_plant", "sv_cv", "sv_hv",
     "sv_forest", "elev", "diet", "energy", "water", "age", "winlen", "frame", "fps",
-    "nightveil", "dayicon", "daytime",
+    "nightveil", "dayicon", "daytime", "ec_hist", "sv_low",
   ].forEach((id) => (ui[id] = $(id)));
 
   Renderer.init(canvas);
@@ -278,6 +285,83 @@
 
   const pct = (x) => (x * 100).toFixed(0) + "%";
 
+  // The grass<->fruit ecotype histogram, computed here on the client from the
+  // per-agent `forage` field (wire v10) -- no extra bytes on the wire.
+  //
+  // Deliberately NOT `split_score`: that statistic's first version read ~0.19 on
+  // all six arms including three obviously unimodal neutral ones (see
+  // explorations/20260804-readouts/split_score.py) and was still broken when it
+  // was used in a verdict (docs/multispecies_feasibility.md §16.4). Reimplementing
+  // it here without tests would produce plausible-looking wrong numbers. What is
+  // drawn instead is the histogram itself plus `low_mass`, which is one sum and
+  // has no failure mode -- and which is the component §18 actually judges on.
+  const _ecBins = new Float32Array(EC_BINS);
+  function ecotypeHistogram(snap) {
+    _ecBins.fill(0);
+    const a = snap.agents;
+    let n = 0;
+    for (let i = 0; i < snap.n; i++) {
+      const o = i * STRIDE;
+      // Herbivores only -- trajectory.py:_hist_fn is `alive & (diet < 0.35)`, and
+      // in the default world carnivores are a fifth of the population, so
+      // including them would draw a different quantity from the one measured.
+      if (a[o + 2] >= 0.35) continue;
+      let k = (a[o + 9] * EC_BINS) | 0;        // same clip binning as hist_of
+      if (k < 0) k = 0; else if (k >= EC_BINS) k = EC_BINS - 1;
+      _ecBins[k] += 1;
+      n++;
+    }
+    return n;
+  }
+
+  // Bar colour follows the same ramp the shader uses, so a clump on screen and a
+  // peak in the panel are recognisably the same population.
+  function ecColour(t) {
+    const f = t - 0.5;
+    const w = Math.min(Math.abs(f) / 0.22, 1) * 0.85;
+    const sp = f >= 0 ? [0.35, 0.85, 0.45] : [0.98, 0.62, 0.20];
+    const base = [0.62, 0.32, 0.92];
+    const c = base.map((v, i) => Math.round(255 * (v * (1 - w) + sp[i] * w)));
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  }
+
+  function drawEcotype(snap) {
+    const el = ui.ec_hist;
+    const n = ecotypeHistogram(snap);
+    const dpr = DPR();
+    const w = el.clientWidth || 260, h = el.clientHeight || 52;
+    if (el.width !== Math.round(w * dpr) || el.height !== Math.round(h * dpr)) {
+      el.width = Math.round(w * dpr);
+      el.height = Math.round(h * dpr);
+    }
+    const ctx = el.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (n < 1) { ui.sv_low.textContent = "–"; return; }
+
+    let peak = 0, low = 0;
+    for (let k = 0; k < EC_BINS; k++) {
+      if (_ecBins[k] > peak) peak = _ecBins[k];
+      if (k < EC_LOW) low += _ecBins[k];
+    }
+    const bw = w / EC_BINS;
+    for (let k = 0; k < EC_BINS; k++) {
+      const bh = (_ecBins[k] / peak) * (h - 4);
+      ctx.fillStyle = ecColour((k + 0.5) / EC_BINS);
+      ctx.fillRect(k * bw, h - bh, Math.max(bw - 1, 1), bh);
+    }
+    // the `low_mass` cut, so the number in the header has a visible referent
+    ctx.strokeStyle = C.rule;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(EC_LOW * bw) + 0.5, 0);
+    ctx.lineTo(Math.round(EC_LOW * bw) + 0.5, h);
+    ctx.stroke();
+    ui.sv_low.textContent = pct(low / n);
+    el.title = `食草者 ${n.toLocaleString()} 只 · pref<0.35 占 ${pct(low / n)}`
+      + ` · 分箱与分析脚本一致（20 箱，端点 clip）`;
+  }
+
   function drawAllSparks() {
     drawSparkline(ui.sp_pop, [{ data: hist.pop, color: C.halo, fill: true }],
       { fmt: (x) => x.toFixed(0) });
@@ -514,6 +598,7 @@
       ui.frame.textContent = latest.frame.toLocaleString();
       updateDayNight(latest.phase);
       drawAllSparks();
+      drawEcotype(latest);
     }
     frames++;
     const now = performance.now();

@@ -331,6 +331,32 @@ def check_agent_stride(r: Report) -> None:
              f"regex misses, so the bounds check above is reading an incomplete set")
 
 
+def check_ecotype_bins(r: Report) -> None:
+    """dashboard 的觅食直方图必须与**分析脚本**用同一套分箱。
+
+    面板画的是 `forage_pref` 的分布，而 `docs/multispecies_feasibility.md` §17.9/§18
+    的判决也是在这个分布上做的。**两边分箱不一样，屏幕上的东西就不是判决里的那个东西**
+    ——而且不会有任何报错，只会得到一张看起来合理的图。
+
+    只钉**箱数**：那是能可靠正则化的部分。分箱**公式**（端点 clip 而非丢弃）由
+    `tests/test_neutral_null.py:test_hist_of_counts_every_individual` 在 Python 端守，
+    JS 端不测（本仓库不跑 node 之外的 JS 工具）。
+    """
+    traj = (ROOT / "explorations" / "20260804-readouts" / "trajectory.py").read_text()
+    main_js = (ROOT / "web" / "main.js").read_text()
+    m = re.search(r"BINS\s*=\s*np\.linspace\(\s*0(?:\.0)?\s*,\s*1(?:\.0)?\s*,\s*(\d+)\s*\)", traj)
+    j = re.search(r"EC_BINS\s*=\s*(\d+)", main_js)
+    if not r.expect(m is not None and j is not None,
+                    "both sides declare the forage binning",
+                    f"trajectory.py BINS found={m is not None}, main.js EC_BINS found={j is not None}"):
+        return
+    py_bins = int(m.group(1)) - 1          # linspace(0,1,N) 给 N-1 个箱
+    js_bins = int(j.group(1))
+    r.expect(py_bins == js_bins,
+             f"dashboard forage histogram matches the analysis binning ({js_bins} bins)",
+             f"trajectory.py has {py_bins} bins, main.js draws {js_bins}")
+
+
 def check_species_colours(r: Report) -> None:
     """Herbivore and carnivore colours, duplicated across three files.
 
@@ -578,6 +604,7 @@ def main() -> int:
     check_syntax(r)
     check_wire_protocol(r)
     check_agent_stride(r)
+    check_ecotype_bins(r)
     check_species_colours(r)
     check_config_invariants(r)
 
