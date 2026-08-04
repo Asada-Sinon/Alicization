@@ -101,8 +101,12 @@ def paired(x, y, sd_pool, label, why):
         return
     w = sd_pool[np.isfinite(sd_pool)]
     sw = float(np.sqrt((w ** 2).mean())) if len(w) else float("nan")
+    # ⚠️ **本函数偏离了 §19.5 指定的 `scripts/exp_stats.py`，而那个偏差是有后果的**：
+    # 这里额外套了一个 90% 卡方上界，比共享实现**更严**。R16 判决里 H3 的「比值恰好
+    # 1.0035、刀刃上」就是这么来的——按共享口径是 **+1.38**。两个数都报，不许只报一个。
     ub = sw * np.sqrt(len(w) / chi2.ppf(0.10, len(w))) if len(w) else float("nan")
     noise = np.sqrt(2) * ub / np.sqrt(len(REPS))
+    noise_shared = np.sqrt(2) * sw / np.sqrt(len(REPS))    # 无卡方上界 = exp_stats 口径
     p = wilcoxon(x[m], y[m]).pvalue if np.any(d != 0) else float("nan")
     # **读数饱和时比值是无定义的，不是「很大」。** 末1/4 占空比顶在 1.0 会让格内 SD
     # 恰好为 0 ⇒ 噪声除零 ⇒ 打印出 3.4e11 这种数。报一个那样的数比不报还糟：
@@ -110,8 +114,9 @@ def paired(x, y, sd_pool, label, why):
     if not np.isfinite(noise) or noise < 1e-9:
         ratio = "  比值 **无定义（读数饱和，σ̂_W ≈ 0）**"
     else:
-        ratio = (f"  比值 {d.mean() / noise:+.2f}"
-                 + ("   ** <1，判 undecidable **" if abs(d.mean()) < noise else ""))
+        ratio = (f"  比值 {d.mean() / noise:+.2f}（卡方上界口径）"
+                 f" / {d.mean() / max(noise_shared, 1e-12):+.2f}（exp_stats 口径）"
+                 + ("   ** 严口径 <1 **" if abs(d.mean()) < noise else ""))
     print(f"    {label}: {d.mean():+.4f}   {int((d > 0).sum())}/{len(d)} 为正   "
           f"p={p:.5f}{ratio}")
     print(f"      逐格 = {np.round(d, 4).tolist()}   ({why})")
@@ -159,7 +164,10 @@ def main():
         print("  H3（捕食通道，长时程）：R38n − R38p 的末1/4 占空比")
         sdn, sdp = within_sd(R, "R38n", occ4), within_sd(R, "R38p", occ4)
         rn, rp = np.nanmean(sdn), np.nanmean(sdp)
-        print(f"    两臂格内 SD：R38n {rn:.4f} / R38p {rp:.4f}   比 {max(rn,rp)/max(min(rn,rp),1e-9):.1f}×")
+            # **0 / 1e-9 打出来的「4e8×」不是一个量级，是「无定义」。**
+        rat = ("无定义（有一臂 SD 恰为 0）" if min(rn, rp) < 1e-9
+               else f"{max(rn, rp) / min(rn, rp):.1f}×")
+        print(f"    两臂格内 SD：R38n {rn:.4f} / R38p {rp:.4f}   比 {rat}")
         both = np.concatenate([sdn, sdp])
         if max(rn, rp) / max(min(rn, rp), 1e-9) >= 10:
             print("    ⚠️ 差一个量级 ⇒ **不池化**，三种口径都报（`MEMORY.md [LEARN:stats]`）")
