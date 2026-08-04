@@ -90,6 +90,52 @@ def _hist_fn(cfg):
     return f
 
 
+def _ld_fn(cfg):
+    """两个觅食簇在**非 `forage_pref` 基因**上的分化（`multispecies_program.md` §20 的 H1）。
+
+    **为什么主判据不是「分裂会不会变得更尖」**：`forage_pref` 是**单基因座**，
+    而 `genome.py` 的均匀交叉**从不产生中间值**——一个位点非此即彼。
+    中间型只来自 `σ=0.02` 的突变，与配对无关。**所以重组本来就压不平那个双峰，
+    同型交配也就不可能让它更尖**；那个设计按构造是个 null（审查抓出来的）。
+    同型交配真正改变的是 `forage_pref` 与**其余基因**的连锁不平衡。
+
+    统计量 = 两簇（`pref<0.35` / `pref>0.65`）之间，**每个非 `forage_pref` 位点**的
+    Cohen's d，取 `mean |d|`。**零假设不是 0**：随机交配下漂变本身就产生非零值，
+    所以必须有 `w=0` 对照臂，不能拿 0 当零点。
+
+    全部在设备上算，**只传回 9 个浮点**（全基因组 mean|d| + 7 个具名性状 + 两簇计数），
+    不把 `[n_max, 1386]`（90 MiB）的 genome 拉回主机。
+    """
+    fp = cfg.forage_pref_index
+    bp = cfg.brain_params
+    # 屏蔽 forage_pref 自己：它按构造两簇完全分开，算进去只会稀释别的位点的信号
+    keep = jnp.ones(cfg.genome_size, jnp.float32).at[fp].set(0.0)
+
+    @jax.jit
+    def f(genome, alive, diet):
+        pref = jax.nn.sigmoid(genome[:, fp])
+        herb = alive & (diet < 0.35)
+        lo = (herb & (pref < 0.35)).astype(jnp.float32)[:, None]
+        hi = (herb & (pref > 0.65)).astype(jnp.float32)[:, None]
+        nlo, nhi = jnp.sum(lo), jnp.sum(hi)
+
+        def moments(w, n):
+            mu = jnp.sum(genome * w, 0) / jnp.maximum(n, 1.0)
+            var = jnp.sum(w * (genome - mu) ** 2, 0) / jnp.maximum(n - 1.0, 1.0)
+            return mu, var
+
+        mlo, vlo = moments(lo, nlo)
+        mhi, vhi = moments(hi, nhi)
+        sp = jnp.sqrt(jnp.maximum(0.5 * (vlo + vhi), 1e-12))
+        d = jnp.abs((mhi - mlo) / sp)
+        # 两簇都要有足够个体，否则 d 是噪声；不够就返回 NaN 而不是一个小数字
+        ok = (nlo >= 30.0) & (nhi >= 30.0)
+        mean_d = jnp.where(ok, jnp.sum(d * keep) / jnp.sum(keep), jnp.nan)
+        traits = jnp.where(ok, d[bp:bp + 7], jnp.nan)   # diet/invest/size/attack/escape/armor/spike
+        return mean_d, traits, nlo, nhi
+    return f
+
+
 def dip_ratio(n):
     p = np.asarray(n, float)
     p = p / max(p.sum(), 1.0)
@@ -108,6 +154,7 @@ def main(steps, seed, overrides, as_json, checkpoints):
     cfg = dataclasses.replace(Config(), seed=seed, **(overrides or {}))
     state, key, _step, scan_fn, _terrain = new_world(cfg)
     hist_fn = _hist_fn(cfg)
+    ld_fn = _ld_fn(cfg)
     cps = sorted(int(round(steps * (i + 1) / checkpoints)) for i in range(checkpoints))
 
     row = {}
@@ -182,6 +229,12 @@ def main(steps, seed, overrides, as_json, checkpoints):
                 "in_window": float(n.sum() / max(len(p), 1)),
                 "readout_valid": bool(n.sum() / max(len(p), 1) >= 0.95),
             }
+            # 连锁不平衡：两个觅食簇在非 `forage_pref` 基因上的分化（§20 的 H1）。
+            # 设备上算，只回传 9 个浮点。
+            _md, _tr, _nlo, _nhi = ld_fn(state.genome, state.alive, state.diet)
+            cp["ld_mean_abs_d"] = float(_md)
+            cp["ld_trait_d"] = [float(v) for v in np.asarray(_tr)]
+            cp["ld_n_lo"], cp["ld_n_hi"] = int(_nlo), int(_nhi)
             # **通量三件套：操作检查（manipulation check）用的**。
             # `§13.7`/`§16.3` 说「资源比固定在 11%」是**承载**口径；而这个世界实测的
             # **供给通量**配比早就是 ~1:2（`T05` 各 run 的 `frugivory_frac` = 0.31–0.44）。
