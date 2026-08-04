@@ -60,7 +60,14 @@ from split_score import split_score
 from underworld import Config, new_world
 from underworld import state as state_mod
 
-BINS = np.linspace(0.15, 0.85, 15)
+# **值域必须覆盖 [0,1]，不能只量中间 70%。** `forage_pref_of` 是 sigmoid，值域就是 [0,1]；
+# 而 R14 用 `linspace(0.15,0.85,15)` + `np.digitize` 把窗外个体从**分子和分母同时剔除**，
+# 实测 `R50` 臂在 cp1 有 **58% 的个体落在标尺之外**，于是 `Δ(窗内比例)` 与 `Δlow_mass` 的
+# Spearman 高达 +0.729（p=5e-5）——**「衰减」几乎就是截断本身**，主判据整个作废。
+# 换成不截断的口径后符号翻转且不显著（+0.026，p=0.266）。
+# 这是同型失误的**第三次**（固定带的双峰检测器、边界平滑补零、直方图 range），
+# 见 `MEMORY.md [LEARN:tooling]`。
+BINS = np.linspace(0.0, 1.0, 21)
 CTR = 0.5 * (BINS[:-1] + BINS[1:])
 TRAJ_EVERY = 250           # 便宜轨迹的采样间隔
 WINDOW = 2000              # 每个检查点的贵读数窗口
@@ -166,6 +173,10 @@ def main(steps, seed, overrides, as_json, checkpoints):
                 "dip_ratio": dip_ratio(n),
                 "sd": float(np.mean([x.std() for x in pa])),
                 "mean_pref": float(p.mean()),
+                # **窗内比例是一等读数，不是诊断信息。** 低于 0.95 直接判读数失效——
+                # 这一条能让上面那类截断失误不可能再静默发生。
+                "in_window": float(n.sum() / max(len(p), 1)),
+                "readout_valid": bool(n.sum() / max(len(p), 1) >= 0.95),
             }
             # **通量三件套：操作检查（manipulation check）用的**。
             # `§13.7`/`§16.3` 说「资源比固定在 11%」是**承载**口径；而这个世界实测的
