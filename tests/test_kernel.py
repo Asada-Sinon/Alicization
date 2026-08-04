@@ -1122,6 +1122,61 @@ def test_diet_mutation_asymmetric_can_be_switched_off():
         "diet should mutate at the same rate as a brain gene when symmetric"
 
 
+def test_mate_forage_weight_sorts_ecotypes_together():
+    """`mate_forage_weight` 的**机制点火**判据（`multispecies_program.md` §20 的 H2）。
+
+    零假设是 **0.50**：`forage_pref` 与 `diet` 无关，所以按 `diet` 排序的配对
+    在两个觅食簇之间是随机的，跨簇配对期望正好一半。
+
+    分布照实测取（`feasibility.md` §18.4）：`pref` 双峰在 **0.151 / 0.720**，
+    而 `diet` 在食草者内部只散布约 **0.035**。**那个尺度差正是旋钮饱和得快的原因**——
+    `w` 控的是两个排序键的尺度比，不是「隔离强度」的线性刻度。
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    n = 512
+    lo = rng.normal(0.151, 0.045, n)
+    hi = rng.normal(0.720, 0.055, n)
+    pref = jnp.asarray(np.clip(np.where(rng.random(n) < 0.5, lo, hi), 0, 1), jnp.float32)
+    diet = jnp.asarray(np.clip(rng.normal(0.09, 0.035, n), 0, 1), jnp.float32)
+    want = jnp.ones(n, bool)
+    key = jax.random.PRNGKey(0)
+
+    def cross_frac(w):
+        cfg = tiny_cfg(n_max=n, n_init=n, mate_forage_weight=w)
+        mate = reproduction._assortative_mate(want, diet, cfg, key, pref)
+        a, b = np.asarray(pref), np.asarray(pref)[np.asarray(mate)]
+        return float((((a < 0.4) & (b > 0.4)) | ((a > 0.4) & (b < 0.4))).mean())
+
+    off, on = cross_frac(0.0), cross_frac(0.2)
+    assert abs(off - 0.5) < 0.08, (
+        f"旋钮关时跨簇配对应当≈0.50（按 diet 排序对 pref 是随机的），实测 {off:.3f}")
+    assert on < 0.15, f"w=0.2 应当把跨簇配对压到 <0.15，实测 {on:.3f}"
+    # **饱和**：再往上加权重换不来多少东西，所以剂量点该取 0.05–0.30 而不是 0–1
+    assert cross_frac(0.5) < on + 0.02
+
+
+def test_mate_forage_weight_off_is_the_old_path():
+    """`w = 0` 必须走**旧代码**——编译期 `if`，不是「数学上等价」。
+
+    等价性在实数上成立，在 float32 上不成立：复合键把食肉者放进 [2,3)，
+    那里的 ULP 是 `2⁻²²` 而 `diet ∈ [0.5,1)` 是 `2⁻²⁴`，**精度掉 2 bit**，
+    于是 `diet` 相差 < 2.4e-7 的食肉者会并列，而 `jnp.argsort` 稳定（按 index 破并列）
+    ⇒ 配对**不同**。所以这里断言的是「与不传 `forage` 的调用逐位相同」。
+    """
+    n = 128
+    diet = jnp.linspace(0.0, 1.0, n)
+    pref = jax.random.uniform(jax.random.PRNGKey(3), (n,))
+    want = jnp.ones(n, bool)
+    key = jax.random.PRNGKey(0)
+    cfg = tiny_cfg(n_max=n, n_init=n)                      # mate_forage_weight 默认 0.0
+    assert cfg.mate_forage_weight == 0.0
+    base = reproduction._assortative_mate(want, diet, cfg, key)
+    with_arg = reproduction._assortative_mate(want, diet, cfg, key, pref)
+    assert jnp.array_equal(base, with_arg), "旋钮关时传不传 forage 必须给出同一个配对"
+
+
 def test_assortative_mating_can_be_switched_off():
     """docs/biology.md §10.1/§10.5: partners are sorted by diet (assortative)
     by default, so paired agents have near-identical diet. `assortative_mating

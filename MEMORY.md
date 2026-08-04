@@ -454,3 +454,33 @@
   更一般的：**饱和的读数不能当判据的分母。**
 - 来源: Session 2026-08-05（R16 分析脚本在真数据上空跑时发现），
   细节见 `docs/multispecies_program.md` §19.4b 与 `analyze_r16.py`
+
+### [LEARN:method] **在这个仓库里，「跑两次 diff 输出」不能当 bit-exact 的验证**——同一份代码跑两次就已经不同
+- 现象: 给 `reproduction.py` 加了一个默认关的旋钮，按审查建议做「可执行的 bit-exact 验证」：
+  `git stash` 前后各跑一次同一条 `run_headless.py` 命令、diff JSON。**它失败了**。
+  在下结论「我的改动破坏了默认臂」之前先跑了对照——**同一份代码连跑两次，47 个字段不同**
+  （`population` 2170 vs 2235、`mean_energy` 9.273 vs 9.396）。
+  **那个验证方法从一开始就无效，它那次「失败」什么都没证明。**
+- 原因: `CLAUDE.md` 明写「GPU 上的确定性不是逐位的」——逐格 scatter-add 是原子操作、会重排。
+  我知道这条，审查也不该被苛责（它不在这个仓库里），**但我照做时没有把它和这条已知事实对上**。
+  **一个验证方法在被用来否定代码之前，必须先在「已知应当通过」的情形上跑一次。**
+- 对策: 正确的验证是**比较编译出来的程序**，不是比较运行结果：
+  `jax.make_jaxpr(step_fn)(state, key)` 的 SHA256 指纹，默认配置下前后必须逐字相同
+  （实测 `8c358b1d…`、193502 字符，前后一致）。它证明的是「新分支在默认配置下
+  根本没被编译进去」，比任何单次 run 的比较都强，且**不依赖 GPU 的 run 间确定性**。
+  ⚠️ 写这类脚本要让它**拒绝空输出**：第一版因 `build_step()` 缺参数报错，
+  前后两次报了同一条错误信息，diff 就「通过」了——**靠报错通过的检查比不检查更糟**。
+- 来源: Session 2026-08-05（R17 落地时）
+
+### [LEARN:env] 这台机器的 `merge.conflictstyle=zdiff3` 会让 **`git stash pop` 静默丢工作**
+- 现象: `git stash pop -q` 打印 `fatal: unknown style 'zdiff3'` 后**什么都没恢复**，
+  而我当时只看了后续命令的输出、没看 git 的返回码，于是 `underworld/` 的改动
+  在 stash 里躺了好几步才被发现（现象是「`Config` 上没有那个字段」）。
+  同一个配置也让 `git checkout <stash> -- <paths>` 和 `git -c merge.conflictstyle=... stash pop`
+  一起挂掉——**`-c` 覆盖不管用**，全局值仍会被校验。
+- 原因: 全局与本地都设了 `zdiff3`，而这个 git 版本不认。任何走 merge 机制的命令都 fatal。
+- 对策: 取回用**不走 merge 机制**的路径：`git show 'stash@{0}:<path>' > <path>`。
+  更根本的：**`git stash` 在这台机器上是危险动作**，需要临时切走改动时优先用
+  `git worktree` 或者干脆把文件复制到 scratchpad，而不是 stash。
+  以及：**任何 git 命令都要看返回码，不能只看它后面那条命令的输出。**
+- 来源: Session 2026-08-05（R17 落地时）

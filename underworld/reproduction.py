@@ -17,7 +17,7 @@ import jax.numpy as jnp
 
 from .config import Config
 from .genome import crossover, mutate
-from .state import WorldState, invest_of, pos_to_cell, size_of
+from .state import WorldState, forage_pref_of, invest_of, pos_to_cell, size_of
 
 
 class Deaths(NamedTuple):
@@ -91,7 +91,7 @@ def cull(state: WorldState, water_damage: jax.Array, cfg: Config):
 
 
 def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config,
-                       key: jax.Array) -> jax.Array:
+                       key: jax.Array, forage: jax.Array | None = None) -> jax.Array:
     """For every agent, find another *wanting-to-reproduce* agent with a similar
     diet to serve as a second genetic parent -- assortative by diet so crossover
     mixes brain genes within a species rather than between herbivores and
@@ -99,17 +99,40 @@ def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config,
     no-op, i.e. the old asexual clone) when there's no one else to pair with this
     step (0 or an odd number of reproducers).
 
-    `cfg.assortative_mating=False` is the ablation arm (docs/biology.md
-    §10.1/§10.5): wanters are ranked by an independent uniform draw instead of
-    diet, so pairing is uniformly random among reproducers rather than
-    diet-sorted. Dieckmann & Doebeli (1999) is why this one is tested
-    separately from the other three diet-speciation switches -- theory says
-    assortative mating *maintains* an evolved branch rather than merely seeding
-    one, so it should be ablated only after checking whether a branch forms at
-    all without the other three.
+    `cfg.assortative_mating=False` is the ablation arm (docs/trait_evolution.md
+    §10.1/§10.5 -- the material moved there when biology.md was split, and the old
+    `docs/biology.md` pointer this docstring used to carry no longer resolves):
+    wanters are ranked by an independent uniform draw instead of diet, so pairing
+    is uniformly random among reproducers rather than diet-sorted. Dieckmann &
+    Doebeli (1999) is why this one is tested separately from the other three
+    diet-speciation switches -- theory says assortative mating *maintains* an
+    evolved branch rather than merely seeding one, so it should be ablated only
+    after checking whether a branch forms at all without the other three.
+
+    `cfg.mate_forage_weight > 0` additionally sorts by the grass<->fruit gene, so
+    the two foraging ecotypes preferentially breed within themselves
+    (docs/multispecies_program.md §20). Three things about that branch:
+
+    - The `w == 0` path is the *old code*, reached by a compile-time `if` because
+      `Config` is a jit constant. That is load-bearing, not tidiness: the composite
+      key `2*cls + ...` puts carnivores in [2,3), where float32's ULP is 2^-22
+      against 2^-24 down in [0.5,1) -- two bits of precision lost, so carnivores
+      whose diets differ by under ~2.4e-7 would *tie*, and `jnp.argsort` is stable
+      (ties break by index). That silently changes who pairs with whom, ~1e-3 of
+      steps, ~100 times over a 100k-step run. Order-equivalence is not enough here.
+    - `2.0 * cls` does NOT make cross-class pairing impossible -- rank-adjacent
+      pairing still crosses at the boundary when the herbivore count is odd (0 or 1
+      pair, ~0.5/step), exactly as sorting by `diet` alone already does. What it
+      buys is that a large `w` cannot shuffle carnivores *into* the herbivore run,
+      which would be strictly worse than today.
+    - `forage` is only read when the knob is on, so the default arm pays nothing.
     """
     n = cfg.n_max
     rank_key = diet if cfg.assortative_mating else jax.random.uniform(key, (n,))
+    if cfg.mate_forage_weight > 0.0 and cfg.assortative_mating:
+        w = cfg.mate_forage_weight
+        cls = (diet >= 0.5).astype(diet.dtype)     # 0 = herbivore, 1 = carnivore
+        rank_key = 2.0 * cls + (1.0 - w) * diet + w * forage
     order = jnp.argsort(jnp.where(want, rank_key, jnp.inf))  # wanters first
     n_want = jnp.sum(want)
     swap = jnp.arange(n) ^ 1                              # pairs (0,1) (2,3) ...
@@ -146,7 +169,9 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config,
     k_gen, k_cross, k_pos, k_head, k_hue, k_mate = jax.random.split(key, 6)
 
     # --- build child values for every k (only the is_birth ones are used) ---
-    mate_idx = _assortative_mate(want, state.diet, cfg, k_mate)[parent_idx]
+    forage = (forage_pref_of(state.genome, cfg)
+              if cfg.mate_forage_weight > 0.0 else None)
+    mate_idx = _assortative_mate(want, state.diet, cfg, k_mate, forage)[parent_idx]
     crossed = crossover(state.genome[parent_idx], state.genome[mate_idx], k_cross, cfg)
     child_genome = mutate(crossed, k_gen, cfg)
     # How much to hand over is the parent's own gene, not a global constant.

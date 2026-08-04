@@ -552,6 +552,35 @@ class Config:
     #                                    rather than just seeding one, so it
     #                                    is tested separately from the other
     #                                    three (see docs/TODO.md priority 2).
+    mate_forage_weight: float = 0.0    # 0 = off (bit-exact: a compile-time `if`
+    #                                    keeps the old code path). > 0 makes mate
+    #                                    choice ALSO sort by forage_pref, so the
+    #                                    grass and fruit ecotypes preferentially
+    #                                    breed within themselves. This is the one
+    #                                    thing standing between "two ecotypes" and
+    #                                    "two species": docs/multispecies_feasibility.md
+    #                                    §17/§18 established the 50/50 split is real
+    #                                    and not a drift artefact, and §18.5 says
+    #                                    plainly that we cannot call it two species
+    #                                    because reproductive isolation was never
+    #                                    tested. Pre-registration: multispecies_program.md §20.
+    #
+    #                                    **The knob saturates near w = 0.3.** It sets
+    #                                    the scale ratio between the two sort keys, and
+    #                                    within herbivores `diet` spreads only ~0.035
+    #                                    while `forage_pref` spreads ~0.3 -- so a small
+    #                                    w already lets pref dominate. Measured
+    #                                    cross-cluster pairing: 0.50 at w=0 (exactly
+    #                                    random), 0.257 at 0.1, 0.042 at 0.2, <0.003
+    #                                    from 0.3 up. Dose points belong in 0.05-0.30,
+    #                                    NOT spread evenly over 0-1.
+    #
+    #                                    **This is scaffolding, not evolution.** Real
+    #                                    assortative mating co-evolves with the branch
+    #                                    and acts on the ecological trait itself
+    #                                    (Dieckmann & Doebeli 1999); this is an imposed
+    #                                    constant. A positive result reads "if isolation
+    #                                    exists, then X" -- never "speciation emerged".
     peer_channel_enabled: bool = True  # the `peer` retina channel (see
     #                                    sensors.sense) has no natural "off"
     #                                    position -- it is part of the sensory
