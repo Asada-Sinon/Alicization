@@ -5,7 +5,7 @@
 
   const SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
   const STRIDE = 10;             // floats per agent: x, y, diet, energy, id, size, armor, spike, venom, forage
-  const HEADER_BYTES = 72;       // protocol v10 (forage appended to agent record; header unchanged)
+  const HEADER_BYTES = 76;       // protocol v11 (speed appended to header)
   const PICK_RADIUS = 6.0;       // world units
   const HIST = 600;              // samples kept per series (~20s at 30fps)
   // CONTRACT: the foraging histogram must use the same binning as the analysis
@@ -43,7 +43,7 @@
     "sp_pop", "sp_carn", "sp_std", "sp_plant", "sp_vel", "sp_forest",
     "sigilcap", "sv_pop", "sv_carn", "sv_std", "sv_plant", "sv_cv", "sv_hv",
     "sv_forest", "elev", "diet", "energy", "water", "age", "winlen", "frame", "fps",
-    "nightveil", "dayicon", "daytime", "ec_hist", "sv_low",
+    "nightveil", "dayicon", "daytime", "ec_hist", "sv_low", "speedval",
   ].forEach((id) => (ui[id] = $(id)));
 
   Renderer.init(canvas);
@@ -122,13 +122,14 @@
     const forestFrac = dv.getFloat32(60, true);
     const fruitTotal = dv.getFloat32(64, true);
     const phase = dv.getFloat32(68, true);       // day-night clock, 0/1=midnight
+    const srvSpeed = dv.getFloat32(72, true);    // authoritative steps/frame
     const agents = new Float32Array(buffer, HEADER_BYTES, n * STRIDE);
     const planes = HEADER_BYTES + n * STRIDE * 4;
     const plant = new Uint8Array(buffer, planes, grid * grid);
     const fruit = new Uint8Array(buffer, planes + grid * grid, grid * grid);
     return { frame, n, grid, world, agents, plant, fruit, meanEnergy, plantTotal,
       meanAge, meanDiet, carnFrac, meanWater, dietStd, carnSpeed, herbSpeed,
-      meanElev, forestFrac, fruitTotal, phase };
+      meanElev, forestFrac, fruitTotal, phase, srvSpeed };
   }
 
   // Static terrain, sent once per world: 12-byte header then three u8 planes.
@@ -594,6 +595,19 @@
       ui.energy.textContent = fmt(latest.meanEnergy, 2);
       ui.water.textContent = fmt(latest.meanWater, 2);
       ui.age.textContent = fmt(latest.meanAge, 0);
+      // The server is authoritative about its own step rate (wire v11). Before
+      // this existed the client displayed its hardcoded 4 and computed the window
+      // length from it, so `run_live.py --speed 2000` made this readout wrong by
+      // 500x. The slider can still only *send* SPEEDS values (max 256) -- so
+      // touching it while the server is faster does drop it, permanently. That is
+      // a real limit, but at least nothing on screen is now invented.
+      if (Number.isFinite(latest.srvSpeed) && latest.srvSpeed > 0
+          && latest.srvSpeed !== speed) {
+        speed = latest.srvSpeed;
+        ui.speedval.textContent = speed;
+        const k = SPEEDS.indexOf(speed);
+        if (k >= 0) $("speed").value = String(k);
+      }
       ui.winlen.textContent = (hist.pop.length * speed).toLocaleString();
       ui.frame.textContent = latest.frame.toLocaleString();
       updateDayNight(latest.phase);

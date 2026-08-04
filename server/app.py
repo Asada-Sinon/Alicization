@@ -65,6 +65,11 @@ class Simulation:
         """Runs in an executor thread (JAX releases the GIL during device work)."""
         self.state, self.key, ms = self.scan_fn(self.state, self.key, self.speed)
         self.metrics = {k: float(np.asarray(v)[-1]) for k, v in ms._asdict().items()}
+        # Not a metric of the world -- a fact about how fast it is being stepped.
+        # It rides in the header because the client cannot otherwise know it, and
+        # a dashboard that reports a step rate it invented is worse than one that
+        # reports none (docs/forage_visualization.md §4).
+        self.metrics["speed"] = float(self.speed)
         self.total_steps += self.speed
 
     def _build_snapshot(self):

@@ -21,6 +21,7 @@ One message per frame, little-endian:
         forest_frac       f32
         fruit_total       f32
         phase             f32
+        speed             f32   (sim steps per rendered frame -- the FLA dial)
     agents  (n_agents * 40 bytes): x f32, y f32, diet f32, energy f32, id f32,
                                    size f32, armor f32, spike f32, venom f32,
                                    forage f32
@@ -48,6 +49,15 @@ v9 appended `venom` (32 -> 36 bytes), the envenomation debuff a carnivore carrie
 after biting a spiked prey (docs/trait_defense_landing.md §7). The shader tints a
 venomed agent sickly-green so the herbivore->carnivore retaliation is visible. Same
 append discipline: last per-agent field, header unchanged, prior offsets held.
+
+v11 appended `speed` as the last header float (offset 72, header 72 -> 76). It is
+here to fix a dishonesty rather than to show anything new: `run_live.py --speed`
+sets the server's steps-per-frame, but the client had no way to learn it, so it
+kept displaying its own hardcoded 4 -- and the "window length" readout, which is
+`frames * speed`, was wrong by the same factor (500x during a headless
+verification run at --speed 2000). Appending to the header moves the agent block,
+which is why HEADER_BYTES is the only client constant that had to change; every
+prior header offset held (docs/forage_visualization.md §4).
 
 v10 appended `forage` (36 -> 40 bytes), the decoded grass<->fruit preference gene
 (`state.forage_pref_of`, a plain sigmoid so the range is [0,1]; high = better at
@@ -86,7 +96,7 @@ import numpy as np
 
 MAGIC = b"UNDW"
 TERRAIN_MAGIC = b"UNTR"
-_HEADER = struct.Struct("<4sIII ffffffffffffff")
+_HEADER = struct.Struct("<4sIII fffffffffffffff")
 _TERRAIN_HEADER = struct.Struct("<4sIf")
 
 
@@ -140,6 +150,7 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
         float(metrics.get("forest_frac", 0.0)),
         float(metrics.get("fruit_total", 0.0)),
         float(metrics.get("phase", 0.0)),
+        float(metrics.get("speed", 4.0)),
     )
 
     agents = np.empty((n, 10), dtype="<f4")
