@@ -308,14 +308,27 @@ def check_agent_stride(r: Report) -> None:
              f"encode() fills every agent column (0..{py_k - 1})",
              f"filled {cols}, expected {list(range(py_k))}")
 
-    # shader 的属性偏移必须落在记录之内（stride 由 STRIDE_FLOATS 推出，此处只查 offset）
-    offs = [int(o) for o in re.findall(
-        r"vertexAttribPointer\(\s*pt\.\w+\s*,\s*\d+\s*,\s*gl\.FLOAT\s*,"
-        r"\s*\w+\s*,\s*stride\s*,\s*(\d+)\s*\)", render_js)]
-    worst = max(offs) if offs else -1
-    r.expect(offs and worst < py_k * 4,
-             f"render.js agent attribute offsets fit in the record (max {worst} < {py_k * 4})",
-             f"max offset {worst} does not fit {py_k} floats ({py_k * 4} bytes)")
+    # shader 的属性必须整个落在记录之内。**要查末字节，不是首字节**：
+    # 一个 `vec2` 属性从 offset 36 起会读到 40，而 `36 < 40` 会让只查首字节的版本
+    # 静默通过、实际越界读到下一个 agent 的 x。v10 把相邻的 diet+energy 并成 vec2,
+    # 正是这一步第一次让这个洞可被触发——所以这里捕获**分量数**。
+    ptrs = re.findall(
+        r"vertexAttribPointer\(\s*[^,]+,\s*(\d+)\s*,\s*gl\.FLOAT\s*,"
+        r"\s*\w+\s*,\s*stride\s*,\s*(\d+)\s*\)", render_js)
+    worst = max((int(o) + 4 * int(c) for c, o in ptrs), default=-1)
+    r.expect(bool(ptrs) and worst <= py_k * 4,
+             f"render.js agent attributes fit in the record (last byte {worst} <= {py_k * 4})",
+             f"an attribute ends at {worst}, past {py_k} floats ({py_k * 4} bytes)")
+
+    # **锚点不能只靠 `pt.`**：某条 pointer 写成别的变量名就会从 `ptrs` 里掉出去，
+    # max 被低估而检查静默通过。改锚 `stride` 字面量，并与实际启用的属性数交叉核对。
+    # 减 1 是 `a_h`，它走另一个 buffer（`stride` 参数为 0），不在这条记录里。
+    enabled = render_js.count("enableVertexAttribArray(pt.")
+    r.expect(len(ptrs) == enabled - 1,
+             f"every enabled agent attribute is accounted for ({len(ptrs)} of {enabled - 1})",
+             f"{enabled - 1} attributes enabled from the agent buffer but "
+             f"{len(ptrs)} pointer calls matched -- one is written in a form the "
+             f"regex misses, so the bounds check above is reading an incomplete set")
 
 
 def check_species_colours(r: Report) -> None:
