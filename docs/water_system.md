@@ -180,7 +180,7 @@ vs 骆驼),补水频率仍可相差数倍,差的是**储水容量、代谢水利
 ## 2. 代码审计:水系统逐参数对照生物学
 
 当前水参数(`underworld/config.py`):`water_init=8.0`、`water_max=10.0`、
-`base_water_cost=0.02`、`move_water_cost=0.05`、`drink_rate=2.0`、
+`base_water_cost=0.01`、`move_water_cost=0.025`（⚠️ 本行原写 0.02/0.05，那是 `543483a` 水修复**之前**的值——本文自称「**当前**水参数」所以必须跟着改；`rebalance.md`/`three_d.md`/`water_fix_retune.md` 里的旧值是**历史记述**，不动）、`drink_rate=2.0`、
 `forage_water_frac=0.10`、`meat_water_frac=0.3`、`invest_min=0.2`、
 `invest_span=0.6`。相关代码:`dynamics.drink`/`dynamics.thirst`(耗水与补水)、
 `reproduction.cull` 的 `parched = state.water <= 0.0`(死亡判定)、
