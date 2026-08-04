@@ -268,6 +268,56 @@ def _walk_format(fmt: str):
                 yield kind, struct.calcsize(kind)
 
 
+def check_agent_stride(r: Report) -> None:
+    """**per-agent record 的宽度**，在三个文件之间。
+
+    `check_wire_protocol` 查的全是 header；**per-agent 那一段此前完全没人管**。
+    它坏掉的表现是：`protocol.encode` 每个 agent 写 K 个 float 而 `main.js` 按 K-1 读，
+    于是**从第二个 agent 起每一个字段都错位**——画面照样画出来，颜色/大小/位置全是别人的。
+    **看起来合理的错画面，不是异常**，正是 `CLAUDE.md` 说的该由检查器守的那一类。
+
+    三处必须自洽：
+
+      - `protocol.py` 的 `agents = np.empty((n, K), ...)`
+      - `web/main.js` 的 `STRIDE = K`
+      - `web/render.js` 里每个 `vertexAttribPointer(..., stride, offset)` 的最大 offset
+        必须落在 K 个 float 之内（stride 本身由 `STRIDE_FLOATS * 4` 算出，不重复写死）
+    """
+    src = (ROOT / "server" / "protocol.py").read_text()
+    main_js = (ROOT / "web" / "main.js").read_text()
+    render_js = (ROOT / "web" / "render.js").read_text()
+
+    m = re.search(r"agents\s*=\s*np\.empty\(\(\s*n\s*,\s*(\d+)\s*\)", src)
+    if not r.expect(m is not None, "protocol.py declares the agent record width",
+                    "no `agents = np.empty((n, K)` found"):
+        return
+    py_k = int(m.group(1))
+
+    m = re.search(r"STRIDE\s*=\s*(\d+)", main_js)
+    if not r.expect(m is not None, "main.js declares STRIDE", "not found"):
+        return
+    js_k = int(m.group(1))
+
+    r.expect(py_k == js_k,
+             f"agent record width agrees ({py_k} floats)",
+             f"protocol.py writes {py_k}, main.js reads {js_k}")
+
+    # `protocol.encode` 逐列赋值，列号必须恰好覆盖 0..K-1，一个不多一个不少。
+    cols = sorted({int(c) for c in re.findall(r"agents\[:,\s*(\d+)\]\s*=", src)})
+    r.expect(cols == list(range(py_k)),
+             f"encode() fills every agent column (0..{py_k - 1})",
+             f"filled {cols}, expected {list(range(py_k))}")
+
+    # shader 的属性偏移必须落在记录之内（stride 由 STRIDE_FLOATS 推出，此处只查 offset）
+    offs = [int(o) for o in re.findall(
+        r"vertexAttribPointer\(\s*pt\.\w+\s*,\s*\d+\s*,\s*gl\.FLOAT\s*,"
+        r"\s*\w+\s*,\s*stride\s*,\s*(\d+)\s*\)", render_js)]
+    worst = max(offs) if offs else -1
+    r.expect(offs and worst < py_k * 4,
+             f"render.js agent attribute offsets fit in the record (max {worst} < {py_k * 4})",
+             f"max offset {worst} does not fit {py_k} floats ({py_k * 4} bytes)")
+
+
 def check_species_colours(r: Report) -> None:
     """Herbivore and carnivore colours, duplicated across three files.
 
@@ -514,6 +564,7 @@ def main() -> int:
     print("contracts")
     check_syntax(r)
     check_wire_protocol(r)
+    check_agent_stride(r)
     check_species_colours(r)
     check_config_invariants(r)
 
