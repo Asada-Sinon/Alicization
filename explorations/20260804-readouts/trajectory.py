@@ -99,6 +99,7 @@ def main(steps, seed, overrides, as_json, checkpoints):
     hist_fn = _hist_fn(cfg)
     cps = sorted(int(round(steps * (i + 1) / checkpoints)) for i in range(checkpoints))
 
+    row = {}
     traj, out_cps = [], []
     fired = set()                 # 显式记账：窗口本身推进 WINDOW 步，会越过后面的检查点
     done = 0
@@ -131,6 +132,7 @@ def main(steps, seed, overrides, as_json, checkpoints):
             h0 = None
             for i in range(WINDOW // WIN_EVERY):
                 state, key, _ms = scan_fn(state, key, WIN_EVERY)
+                row = {k: float(np.asarray(v)[-1]) for k, v in _ms._asdict().items()}
                 done += WIN_EVERY
                 alive = np.asarray(state.alive)
                 diet = np.asarray(state.diet)
@@ -165,6 +167,13 @@ def main(steps, seed, overrides, as_json, checkpoints):
                 "sd": float(np.mean([x.std() for x in pa])),
                 "mean_pref": float(p.mean()),
             }
+            # **通量三件套：操作检查（manipulation check）用的**。
+            # `§13.7`/`§16.3` 说「资源比固定在 11%」是**承载**口径；而这个世界实测的
+            # **供给通量**配比早就是 ~1:2（`T05` 各 run 的 `frugivory_frac` = 0.31–0.44）。
+            # 没有这三个读数，「配比没动」和「配比动了但没用」分不开——R14 的臂达标与否
+            # 就由它判，不由承载表判。三行，`ms._asdict()` 里本来就有。
+            for _k in ("graze_gain", "fruit_gain", "frugivory_frac"):
+                cp[_k] = row.get(_k, float("nan"))
             # BLRT 只在最后一个检查点（199 次自助 EM 是主机 CPU 成本，且已两次预声明功效不足）
             if done >= steps - WINDOW - TRAJ_EVERY and len(p) >= 30:
                 from probe_trait_dist import blrt_two_components
