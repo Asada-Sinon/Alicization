@@ -63,6 +63,8 @@ def load():
         if "JSON " not in txt:
             continue
         d = json.loads(txt.split("JSON ")[1].split("\n")[0])
+        if d.get("collapsed"):
+            continue          # 崩溃 run 的「后半程」是崩溃前的半段，不入算
         tr = d["traj"]
         h = np.array([q["hist"] for q in tr], float)
         assert np.allclose(h.sum(1), [q["n_herb"] for q in tr], rtol=1e-6, atol=1e-3), f

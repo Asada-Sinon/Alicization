@@ -36,7 +36,7 @@ from split_score import dip_ratio, retained
 
 MUT_SIGMA = 0.02            # config.py:263 forage_pref_mutation_sigma
 OCC_THRESH = 0.5            # 「后半程大部分时间保住分裂」的门槛
-DEFAULT_NS = (105, 340, 600)
+DEFAULT_NS = (105, 340, 600, 2000)   # **四个都要报**，预注册写死的，不许静默删格子
 
 
 def hist_of(pref, bins):
@@ -112,21 +112,78 @@ def sim_run(genes0, n_gen, n_frames, N, bins, rng):
     return out
 
 
-def occupancy(hists, gen, ctr, second_half=True, mass_thresh=0.03, dip_thresh=0.5):
+def _pava(y):
+    """保序回归（pool-adjacent-violators）：`generation` 对帧号的最小二乘单调拟合。
+
+    `generation` 是**存活个体的平均世代数**，不是单调的——一批新生儿到来会把它拉低
+    （R13 实测逐帧 Δ 有 36.6% 为负，范围 −270…+280）。
+    直接 `clip(gradient, 0, None)` 的毛病**不是「丢帧」**（保序化并不总能减少零权重帧：
+    Stage 2 从 12.2% 降到 0.26%，R13 反而 39.9%→40.8%，因为 PAVA 把违序块合并成平台、
+    平台的梯度还是 0）。真正的毛病是**权重总量对不上**：
+
+        数据      口径     Σ权重    真实跨代    比
+        R13       clip    1096.3    455.0    **2.24×**
+        R13       iso      465.7    455.0      1.021
+        Stage 2   clip     175.4    139.3      1.155
+        Stage 2   iso      142.8    139.3      1.028
+
+    **`clip` 在 R13 上凭空多造了 141% 的权重，而且全堆在 boom 帧上**——每一次
+    「新生儿潮把平均世代数拉低、随后回升」都被记成一次净增长，同一段时间数了两遍。
+    保序拟合的权重**加起来等于真实经历的世代数**（误差 2–3%），这才是它该被选中的理由。
+    """
+    lvl = []
+    for v in np.asarray(y, float):
+        lvl.append([v, 1.0])
+        while len(lvl) > 1 and lvl[-2][0] > lvl[-1][0]:
+            v2, w2 = lvl.pop()
+            v1, w1 = lvl.pop()
+            lvl.append([(v1 * w1 + v2 * w2) / (w1 + w2), w1 + w2])
+    out = []
+    for v, c in lvl:
+        out.extend([v] * int(c))
+    return np.array(out)
+
+
+def gen_weights(gen, mode="iso"):
+    """逐帧权重。`iso` = 保序拟合后的世代增量（默认）；`clip` = 旧口径；`unif` = 等权。
+
+    三种口径的敏感性实测在 `feasibility.md` §18.4c：**Stage 2 的四臂计数三种口径完全相同**，
+    R13 是 7/8/9（clip/iso/unif）。**报结论时三种都要给，不许挑一个用。**
+    """
+    g = np.asarray(gen, float)
+    if mode == "unif":
+        return np.ones(len(g))
+    if mode == "clip":
+        return np.clip(np.gradient(g), 0.0, None)
+    return np.clip(np.gradient(_pava(g)), 0.0, None)
+
+
+def weighted_second_half(values, gen, mode="iso"):
+    """后半程的加权均值。**所有「后半程」读数都走这一个函数**，否则会出现
+    `retained_occ` 用 `iso`、`low_mass_second` 用内联 `clip` 这种**两把尺子**的情形
+    ——而它们恰恰是被要求「必须一起看」的三个读数（§18.4）。"""
+    v = np.asarray(values, float)
+    k = len(v) // 2
+    w = gen_weights(gen, mode)[k:]
+    return float((w * v[k:]).sum() / max(w.sum(), 1e-12))
+
+
+def occupancy(hists, gen, ctr, second_half=True, mass_thresh=0.03, dip_thresh=0.5,
+              mode="iso"):
     """`retained()` 的**世代加权**占空比。
 
     加权用世代不用帧，因为关掉捕食者会让种群翻倍、世代钟慢 2–3 倍
     （`feasibility.md §16.3`），按帧加权等于给慢世界更多权重。
     """
     ret = np.array([retained(h, ctr, mass_thresh, dip_thresh) for h in hists], float)
-    w = np.clip(np.gradient(np.asarray(gen, float)), 0.0, None)
+    w = gen_weights(gen, mode)
     k = len(ret) // 2 if second_half else 0
     end = len(ret) if second_half else len(ret) // 2
     ww = w[k:end]
     return float((ww * ret[k:end]).sum() / max(ww.sum(), 1e-12))
 
 
-def null_counts(runs, bins, ctr, N, reps, rng, thresh=OCC_THRESH):
+def null_counts(runs, bins, ctr, N, reps, rng, thresh=OCC_THRESH, mode="iso"):
     """零分布：每次重复把**全部** run 各模拟一遍，数有多少个占空比 > `thresh`。
 
     单位是「跨 run 的计数」，**不是 per-run 的 p 值**——判据问的是
@@ -141,27 +198,41 @@ def null_counts(runs, bins, ctr, N, reps, rng, thresh=OCC_THRESH):
             g0 = genes_from_hist(r["hist"][0], bins, rng)
             span = int(max(r["gen"][-1] - r["gen"][0], 5))
             hs = sim_run(g0, span, len(r["hist"]), N, bins, rng)
-            if occupancy(hs, r["gen"], ctr) > thresh:
+            if occupancy(hs, r["gen"], ctr, mode=mode) > thresh:
                 c += 1
         out.append(c)
     return np.array(out)
 
 
-def report(runs, bins, ctr, label, reps=200, seed=20260804, ns=DEFAULT_NS):
-    """打印一组 run 的实测占空比与各 `N` 下的零分布分位。返回逐 `N` 的 (均值, p)。"""
-    obs = np.array([occupancy(r["hist"], r["gen"], ctr) for r in runs])
+def report(runs, bins, ctr, label, reps=200, seed=20260804, ns=DEFAULT_NS, mode="iso"):
+    """打印一组 run 的实测占空比与各 `N` 下的零分布分位。返回逐 `N` 的 (均值, p)。
+
+    **观测与零假设必须用同一个 `mode`**，否则加权口径的差异会被记成效应。
+    """
+    obs = np.array([occupancy(r["hist"], r["gen"], ctr, mode=mode) for r in runs])
     T = int((obs > OCC_THRESH).sum())
     print(f'  {label}: 后半程 `retained` 占空比 > {OCC_THRESH} 的 run = **{T}/{len(runs)}**'
-          f'   （占空比均值 {obs.mean():.4f}）')
+          f'   （占空比均值 {obs.mean():.4f}，加权口径 {mode}）')
     rng = np.random.default_rng(seed)
     res = {}
+    floor = 1.0 / (reps + 1)
     for N in ns:
-        cnt = null_counts(runs, bins, ctr, N, reps, rng)
-        p = float((cnt >= T).mean())
+        cnt = null_counts(runs, bins, ctr, N, reps, rng, mode=mode)
+        # **`(cnt >= T).mean()` 会取到恰好 0，那不是有效的蒙特卡洛 p 值。**
+        # 正确估计量是 `(1 + k) / (reps + 1)`，它的可达下限就是 `1/(reps+1)`。
+        # 本项目已经在另一个壳里栽过同一个错：n=6 的配对符号秩 p 地板永远是 0.031
+        # （`run_to_run_variance.md §7.0`）。**顶在地板上的 p 不是强证据，是分辨率耗尽。**
+        # 所以同时报零分布的**最大值**——「200 次重复里最多只到 3，而实测 24」
+        # 比一个假的 0.0000 信息量大得多。
+        k = int((cnt >= T).sum())
+        p = (1.0 + k) / (reps + 1.0)
         res[N] = (float(cnt.mean()), p)
         print(f'    N={N:<5} 零均值 {cnt.mean():>5.2f}   5–95% [{np.percentile(cnt, 5):.0f},'
-              f' {np.percentile(cnt, 95):.0f}]   p={p:.4f}'
+              f' {np.percentile(cnt, 95):.0f}]   最大 {cnt.max():>3.0f}   '
+              f'p={"<" if k == 0 else "="}{p:.4f}'
+              f'{"（= 分辨率下限）" if k == 0 else ""}'
               f'{"   ** 不拒绝 **" if p >= 0.05 else ""}')
+    print(f'    （reps={reps} ⇒ p 的分辨率下限 {floor:.4f}；要主张更小必须加 reps）')
     return res
 
 

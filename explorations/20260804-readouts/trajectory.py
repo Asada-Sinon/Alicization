@@ -100,6 +100,10 @@ def dip_ratio(n):
     return float(p[mid].sum()) / max(e, 1e-9)
 
 
+def _fmt(v):
+    return "崩溃" if v is None else f"{v:.3f}"
+
+
 def main(steps, seed, overrides, as_json, checkpoints):
     cfg = dataclasses.replace(Config(), seed=seed, **(overrides or {}))
     state, key, _step, scan_fn, _terrain = new_world(cfg)
@@ -221,28 +225,30 @@ def main(steps, seed, overrides, as_json, checkpoints):
     # `R50n` 的占空比 0.9512 与 `R38n` 的 0.9870 几乎一样，但前者是
     # `low_mass=0.7492 / split_score=0.2506`（整个分布搬到果实侧），
     # 后者是 `0.4501 / 0.4423`（近 50/50 的平衡双簇）——**是两件不同的事。**
-    if len(traj) >= 4:
-        from neutral_null import occupancy
+    # **崩溃的 run 不吐这组读数。** 崩溃时上面 `break`，它的「后半程」是崩溃前的半段——
+    # 那会产出一个形状正常的错误数字，而不是异常（这正是本项目反复踩的那类失误）。
+    # 字段一律写出来（崩溃时为 None），免得下游 `d["retained_occ"]` 时有时无地 KeyError。
+    out["retained_occ"] = out["retained_occ_first"] = None
+    out["low_mass_second"] = out["split_score_second"] = None
+    if len(traj) >= 4 and not collapsed:
+        from neutral_null import occupancy, weighted_second_half
         _h = [np.asarray(q["hist"], float) for q in traj]
         _g = np.array([q["generation"] for q in traj], float)
-        _w = np.clip(np.gradient(_g), 0.0, None)
-        _k = len(_h) // 2
-        _ww = _w[_k:]
+        # **三个读数必须过同一把尺子**（同一个 `mode`），否则加权口径的差异会被读成效应。
         out["retained_occ"] = occupancy(_h, _g, CTR)                       # 后半程
         out["retained_occ_first"] = occupancy(_h, _g, CTR, second_half=False)
-        out["low_mass_second"] = float(
-            (_ww * np.array([h[CTR < 0.35].sum() / max(h.sum(), 1.0) for h in _h[_k:]])).sum()
-            / max(_ww.sum(), 1e-12))
-        out["split_score_second"] = float(
-            (_ww * np.array([split_score(h, CTR)[0] for h in _h[_k:]])).sum()
-            / max(_ww.sum(), 1e-12))
+        out["low_mass_second"] = weighted_second_half(
+            [h[CTR < 0.35].sum() / max(h.sum(), 1.0) for h in _h], _g)
+        out["split_score_second"] = weighted_second_half(
+            [split_score(h, CTR)[0] for h in _h], _g)
+
     if as_json:
         print("JSON " + json.dumps(out))
     print(f"\n[轨迹。总世代数 {out.get('gen_total', float('nan')):.0f}；"
-          f"后半程 retained 占空比 {out.get('retained_occ', float('nan')):.3f}"
-          f"（前半 {out.get('retained_occ_first', float('nan')):.3f}）；"
-          f"后半 low_mass {out.get('low_mass_second', float('nan')):.3f} / "
-          f"split_score {out.get('split_score_second', float('nan')):.3f}。"
+          f"后半程 retained 占空比 {_fmt(out['retained_occ'])}"
+          f"（前半 {_fmt(out['retained_occ_first'])}）；"
+          f"后半 low_mass {_fmt(out['low_mass_second'])} / "
+          f"split_score {_fmt(out['split_score_second'])}。"
           f"中性零分布分位由分析脚本算，见 feasibility.md §17.9/§18]")
 
 
