@@ -162,9 +162,14 @@ def main():
         print(f"    两臂格内 SD：R38n {rn:.4f} / R38p {rp:.4f}   比 {max(rn,rp)/max(min(rn,rp),1e-9):.1f}×")
         both = np.concatenate([sdn, sdp])
         if max(rn, rp) / max(min(rn, rp), 1e-9) >= 10:
-            print("    ⚠️ 差一个量级 ⇒ **不池化**，两种口径都报（`MEMORY.md [LEARN:stats]`）")
-            paired(cell(R, "R38n", occ4), cell(R, "R38p", occ4), sdn, "口径A：只用 R38n", "异质")
-            paired(cell(R, "R38n", occ4), cell(R, "R38p", occ4), both, "口径B：两臂池化", "异质")
+            print("    ⚠️ 差一个量级 ⇒ **不池化**，三种口径都报（`MEMORY.md [LEARN:stats]`）")
+            # **「只在参与对比的臂上池化」这条规矩会和天花板撞上**：`R38n` 的末1/4 占空比
+            # 顶在 1.0 ⇒ 它的 σ̂_W 恰好是 0 ⇒ 口径 A 无定义，口径 B 被那个 0 拉低。
+            # **唯一有分辨率的噪声估计来自 `R38p`**，所以必须报口径 C。
+            # 这一条是空跑时才发现的：规矩本身没错，但它假定了两臂都有方差。
+            paired(cell(R, "R38n", occ4), cell(R, "R38p", occ4), sdn, "口径A：只用 R38n", "饱和臂，通常无定义")
+            paired(cell(R, "R38n", occ4), cell(R, "R38p", occ4), both, "口径B：两臂池化", "被 R38n 的 0 拉低")
+            paired(cell(R, "R38n", occ4), cell(R, "R38p", occ4), sdp, "口径C：只用 R38p", "**唯一有分辨率的那个**")
         else:
             paired(cell(R, "R38n", occ4), cell(R, "R38p", occ4), both, "占空比差",
                    "Stage 2 在 42k 步上是 +0.6140（12/12、比值 +1.91），预测同号")
