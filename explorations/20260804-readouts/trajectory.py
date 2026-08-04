@@ -211,10 +211,39 @@ def main(steps, seed, overrides, as_json, checkpoints):
         out["final_split_score"] = out_cps[-1]["split_score"]
         out["retained"] = int(out_cps[-1]["split_score"] > 0.0)
         out["gen_total"] = float(traj[-1]["generation"] - traj[0]["generation"])
+    # **轨迹级读数**（`feasibility.md` §17.9/§18 的判据，收编进常规输出）。
+    # 判据是「后半程世代加权的 `retained` 占空比」，而**中性零分布留在分析时算**——
+    # 它的单位是「跨 run 的计数」，per-run 的零分布不是对的单位，
+    # 而且每个 run 都跑 200 次模拟会把 sweep 的 CPU 成本翻几倍。
+    # 零假设需要的输入（帧 0 的直方图、跨代数、帧数）本来就在 `traj` 里，分析时现取。
+    #
+    # **三个一起报，不许单看占空比**（§18.4 的代价换来的）：Stage 2 的四个臂里
+    # `R50n` 的占空比 0.9512 与 `R38n` 的 0.9870 几乎一样，但前者是
+    # `low_mass=0.7492 / split_score=0.2506`（整个分布搬到果实侧），
+    # 后者是 `0.4501 / 0.4423`（近 50/50 的平衡双簇）——**是两件不同的事。**
+    if len(traj) >= 4:
+        from neutral_null import occupancy
+        _h = [np.asarray(q["hist"], float) for q in traj]
+        _g = np.array([q["generation"] for q in traj], float)
+        _w = np.clip(np.gradient(_g), 0.0, None)
+        _k = len(_h) // 2
+        _ww = _w[_k:]
+        out["retained_occ"] = occupancy(_h, _g, CTR)                       # 后半程
+        out["retained_occ_first"] = occupancy(_h, _g, CTR, second_half=False)
+        out["low_mass_second"] = float(
+            (_ww * np.array([h[CTR < 0.35].sum() / max(h.sum(), 1.0) for h in _h[_k:]])).sum()
+            / max(_ww.sum(), 1e-12))
+        out["split_score_second"] = float(
+            (_ww * np.array([split_score(h, CTR)[0] for h in _h[_k:]])).sum()
+            / max(_ww.sum(), 1e-12))
     if as_json:
         print("JSON " + json.dumps(out))
-    print(f"\n[R13 轨迹。入组条件 = 第一个检查点的 split_score>0，判据见 §16。"
-          f"实测总世代数 {out.get('gen_total', float('nan')):.0f}]")
+    print(f"\n[轨迹。总世代数 {out.get('gen_total', float('nan')):.0f}；"
+          f"后半程 retained 占空比 {out.get('retained_occ', float('nan')):.3f}"
+          f"（前半 {out.get('retained_occ_first', float('nan')):.3f}）；"
+          f"后半 low_mass {out.get('low_mass_second', float('nan')):.3f} / "
+          f"split_score {out.get('split_score_second', float('nan')):.3f}。"
+          f"中性零分布分位由分析脚本算，见 feasibility.md §17.9/§18]")
 
 
 if __name__ == "__main__":
