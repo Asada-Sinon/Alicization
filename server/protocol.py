@@ -21,8 +21,9 @@ One message per frame, little-endian:
         forest_frac       f32
         fruit_total       f32
         phase             f32
-    agents  (n_agents * 36 bytes): x f32, y f32, diet f32, energy f32, id f32,
-                                   size f32, armor f32, spike f32, venom f32
+    agents  (n_agents * 40 bytes): x f32, y f32, diet f32, energy f32, id f32,
+                                   size f32, armor f32, spike f32, venom f32,
+                                   forage f32
     plant   (grid*grid bytes):     u8, plant energy scaled to [0,255]
     fruit   (grid*grid bytes):     u8, fruit scaled by fruit_max
 
@@ -47,6 +48,16 @@ v9 appended `venom` (32 -> 36 bytes), the envenomation debuff a carnivore carrie
 after biting a spiked prey (docs/trait_defense_landing.md §7). The shader tints a
 venomed agent sickly-green so the herbivore->carnivore retaliation is visible. Same
 append discipline: last per-agent field, header unchanged, prior offsets held.
+
+v10 appended `forage` (36 -> 40 bytes), the decoded grass<->fruit preference gene
+(`state.forage_pref_of`, a plain sigmoid so the range is [0,1]; high = better at
+grass). It is here because docs/multispecies_feasibility.md §17/§18 established
+that the grass/fruit ecotype split is *real* -- not producible by drift plus
+recurrent mutation, 16 of 16 arm x Ne cells at p<0.005 -- and yet nothing on
+screen showed it: colour carried `diet` only. The header did NOT change and no
+existing per-agent offset moved, so this was a three-line wire change (the width
+itself is now guarded by `check_agent_stride` in scripts/check.py, which did not
+exist before v10 -- the per-agent record had never been checked at all).
 
 Terrain is static for a whole run and travels in its own one-shot message
 (`encode_terrain`, magic b"UNTR"), sent on connect and after a reset, rather than
@@ -106,7 +117,8 @@ def encode_terrain(height: np.ndarray, forest: np.ndarray, water_dist: np.ndarra
 
 def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
            energy: np.ndarray, size: np.ndarray, armor: np.ndarray, spike: np.ndarray,
-           venom: np.ndarray, plant: np.ndarray, fruit: np.ndarray, grid: int,
+           venom: np.ndarray, forage: np.ndarray, plant: np.ndarray,
+           fruit: np.ndarray, grid: int,
            world_size: float, plant_max: float, fruit_max: float,
            metrics: dict) -> bytes:
     idx = np.nonzero(alive)[0]
@@ -130,7 +142,7 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
         float(metrics.get("phase", 0.0)),
     )
 
-    agents = np.empty((n, 9), dtype="<f4")
+    agents = np.empty((n, 10), dtype="<f4")
     agents[:, 0] = pos[idx, 0]
     agents[:, 1] = pos[idx, 1]
     agents[:, 2] = diet[idx]
@@ -140,6 +152,7 @@ def encode(frame: int, alive: np.ndarray, pos: np.ndarray, diet: np.ndarray,
     agents[:, 6] = armor[idx]                # decoded armour gene [0, ~0.5]
     agents[:, 7] = spike[idx]                # decoded spike gene  [0, ~0.5]
     agents[:, 8] = venom[idx]                # active envenomation debuff
+    agents[:, 9] = forage[idx]               # decoded grass<->fruit gene, [0,1]
 
     plant_u8 = np.clip(plant / max(plant_max, 1e-6), 0.0, 1.0)
     plant_u8 = (plant_u8 * 255.0).astype(np.uint8)

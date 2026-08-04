@@ -4,8 +4,8 @@
   "use strict";
 
   const SPEEDS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
-  const STRIDE = 9;              // floats per agent: x, y, diet, energy, id, size, armor, spike, venom
-  const HEADER_BYTES = 72;       // protocol v9 (venom appended to agent record; header unchanged)
+  const STRIDE = 10;             // floats per agent: x, y, diet, energy, id, size, armor, spike, venom, forage
+  const HEADER_BYTES = 72;       // protocol v10 (forage appended to agent record; header unchanged)
   const PICK_RADIUS = 6.0;       // world units
   const HIST = 600;              // samples kept per series (~20s at 30fps)
 

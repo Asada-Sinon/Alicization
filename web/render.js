@@ -223,12 +223,18 @@
   const POINT_VS = `
     attribute vec2 a_pos;
     attribute float a_h;
-    attribute float a_diet;
-    attribute float a_energy;
+    // diet and energy are adjacent in the wire record, so they ride in ONE vec2
+    // attribute. That is not tidiness: this program sits exactly at 8 attributes,
+    // and 8 is the MAX_VERTEX_ATTRIBS floor WebGL 1.0 guarantees. Adding a_forage
+    // as a 9th would work on every implementation we have (both give 16) and fail
+    // on a conforming minimal one -- merging keeps the count at 8 instead of
+    // betting on that.
+    attribute vec2 a_de;          // x = diet, y = energy
     attribute float a_size;
     attribute float a_armor;
     attribute float a_spike;
     attribute float a_venom;
+    attribute float a_forage;     // grass<->fruit gene, [0,1], 0.5 = neutral
     uniform mat4 u_viewProj;
     uniform float u_scale;
     uniform float u_hover;
@@ -238,9 +244,10 @@
     varying float v_armor;
     varying float v_spike;
     varying float v_venom;
+    varying float v_forage;
     void main() {
       gl_Position = u_viewProj * vec4(a_pos, a_h + u_hover, 1.0);
-      float s = clamp(a_energy / 12.0, 0.2, 1.6);
+      float s = clamp(a_de.y / 12.0, 0.2, 1.6);
       // carnivores render a touch larger. The perspective divide already
       // makes gl_Position read as near/far, but gl_PointSize is a raw pixel
       // count the rasterizer does NOT divide by w -- so without the explicit
@@ -249,14 +256,15 @@
       // The body-size gene (a_size, neutral 1.0) scales the sprite directly, and
       // spikes add a little headroom so the points have room to draw outside the
       // body -- so morphology is legible per individual (docs/trait_defense_catalog.md).
-      float base = u_scale * (2.5 + 3.0 * s + 2.0 * a_diet) * a_size;
+      float base = u_scale * (2.5 + 3.0 * s + 2.0 * a_de.x) * a_size;
       gl_PointSize = clamp(base * (1.0 + 0.35 * a_spike)
                            * (u_sizeRef / max(gl_Position.w, 0.001)), 1.0, 96.0);
-      v_diet = a_diet;
-      v_energy = a_energy;
+      v_diet = a_de.x;
+      v_energy = a_de.y;
       v_armor = a_armor;
       v_spike = a_spike;
       v_venom = a_venom;
+      v_forage = a_forage;
     }`;
 
   const POINT_FS = `
@@ -266,6 +274,7 @@
     varying float v_armor;
     varying float v_spike;
     varying float v_venom;
+    varying float v_forage;
     void main() {
       vec2 d = gl_PointCoord - vec2(0.5);
       float r = length(d);
@@ -282,6 +291,28 @@
       vec3 c = mix(herb, carn, clamp(v_diet, 0.0, 1.0));
       float b = clamp(0.5 + v_energy * 0.05, 0.5, 1.0);
       c = c * b;
+      // Foraging ecotype (docs/multispecies_feasibility.md §17/§18). The grass<->fruit
+      // axis is a SECOND evolved axis and until v10 nothing on screen carried it --
+      // colour said diet only, so a world that had split into two herbivore
+      // ecotypes looked exactly like one that had not.
+      //
+      // Written so the weight is EXACTLY ZERO at the neutral gene value (0.5): a
+      // herbivore that has not specialised keeps the vec3 herb literal above
+      // untouched, which is both correct (it has no ecotype) and what keeps
+      // scripts/check.py:check_species_colours meaningful -- the pinned literal
+      // stays the colour of a neutral herbivore rather than becoming a colour no
+      // agent ever has. Carnivores are not on this axis, so the weight is zero
+      // for them too.
+      // The 0.22 below is measured, not picked: in the arm where the split is
+      // cleanest the two clusters sit at pref 0.151 and 0.720 with [0.35,0.60)
+      // essentially empty, so the far cluster is only 0.22 from neutral. A ramp
+      // that saturates at 0.5 gives it weight 0.35, which loses to the blue in
+      // the base purple -- the first version of this shader tinted the fruit side
+      // amber and left the grass side an indistinct wash for exactly that reason.
+      float f = clamp(v_forage, 0.0, 1.0) - 0.5;       // -0.5 fruit .. +0.5 grass
+      vec3 spec = mix(vec3(0.98, 0.62, 0.20), vec3(0.35, 0.85, 0.45), step(0.0, f));
+      float w = min(abs(f) / 0.22, 1.0) * 0.85 * (1.0 - clamp(v_diet, 0.0, 1.0));
+      c = mix(c, spec * b, w);
       // Armour: a darker, desaturated body with a hard dark rim -- reads as a
       // thick hide/shell that thickens with the gene.
       float grey = dot(c, vec3(0.333));
@@ -344,12 +375,12 @@
       this.pointLoc = {
         a_pos: gl.getAttribLocation(this.pointProg, "a_pos"),
         a_h: gl.getAttribLocation(this.pointProg, "a_h"),
-        a_diet: gl.getAttribLocation(this.pointProg, "a_diet"),
-        a_energy: gl.getAttribLocation(this.pointProg, "a_energy"),
+        a_de: gl.getAttribLocation(this.pointProg, "a_de"),
         a_size: gl.getAttribLocation(this.pointProg, "a_size"),
         a_armor: gl.getAttribLocation(this.pointProg, "a_armor"),
         a_spike: gl.getAttribLocation(this.pointProg, "a_spike"),
         a_venom: gl.getAttribLocation(this.pointProg, "a_venom"),
+        a_forage: gl.getAttribLocation(this.pointProg, "a_forage"),
         u_viewProj: gl.getUniformLocation(this.pointProg, "u_viewProj"),
         u_scale: gl.getUniformLocation(this.pointProg, "u_scale"),
         u_hover: gl.getUniformLocation(this.pointProg, "u_hover"),
@@ -672,10 +703,8 @@
         gl.bufferData(gl.ARRAY_BUFFER, agents, gl.DYNAMIC_DRAW);
         gl.enableVertexAttribArray(pt.a_pos);
         gl.vertexAttribPointer(pt.a_pos, 2, gl.FLOAT, false, stride, 0);
-        gl.enableVertexAttribArray(pt.a_diet);
-        gl.vertexAttribPointer(pt.a_diet, 1, gl.FLOAT, false, stride, 8);
-        gl.enableVertexAttribArray(pt.a_energy);
-        gl.vertexAttribPointer(pt.a_energy, 1, gl.FLOAT, false, stride, 12);
+        gl.enableVertexAttribArray(pt.a_de);
+        gl.vertexAttribPointer(pt.a_de, 2, gl.FLOAT, false, stride, 8);
         // offset 16 is `id` (read on the CPU for picking, not needed in the shader).
         gl.enableVertexAttribArray(pt.a_size);
         gl.vertexAttribPointer(pt.a_size, 1, gl.FLOAT, false, stride, 20);
@@ -685,6 +714,8 @@
         gl.vertexAttribPointer(pt.a_spike, 1, gl.FLOAT, false, stride, 28);
         gl.enableVertexAttribArray(pt.a_venom);
         gl.vertexAttribPointer(pt.a_venom, 1, gl.FLOAT, false, stride, 32);
+        gl.enableVertexAttribArray(pt.a_forage);
+        gl.vertexAttribPointer(pt.a_forage, 1, gl.FLOAT, false, stride, 36);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this.agentHBuf);
         gl.bufferData(gl.ARRAY_BUFFER, this._hBuf.subarray(0, snap.n), gl.DYNAMIC_DRAW);
