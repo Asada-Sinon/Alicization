@@ -26,6 +26,12 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--speed", type=int, default=None, metavar="STEPS",
+                    help="initial sim steps per rendered frame (the FLA dial, 1..2000). "
+                         "The dashboard slider can change it live, but a headless "
+                         "verification run has no hands -- and at the default 4 steps "
+                         "per frame the interesting arms need minutes of wall clock "
+                         "before anything has evolved to look at.")
     ap.add_argument("--set", action="append", metavar="FIELD=VALUE", dest="sets",
                     help="override a Config field, e.g. --set fruit_energy=4.0. "
                          "Repeatable. Same arms as run_headless.py")
@@ -35,6 +41,8 @@ def main() -> None:
     # before that import below -- hence an env var rather than a function argument.
     if args.sets:
         os.environ["UNDERWORLD_SET"] = ";".join(args.sets)
+    if args.speed is not None:
+        os.environ["UNDERWORLD_SPEED"] = str(args.speed)
 
     if not args.no_open:
         url = f"http://localhost:{args.port}"

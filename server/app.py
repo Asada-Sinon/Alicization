@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from server import protocol
 from underworld import Config, new_world
 from underworld.config import parse_overrides
-from underworld.state import armor_of, size_of, spike_of
+from underworld.state import armor_of, forage_pref_of, size_of, spike_of
 
 
 class Simulation:
@@ -35,7 +35,13 @@ class Simulation:
         self.cfg = cfg
         self.state, self.key, self.step_fn, self.scan_fn, self.terrain = new_world(cfg)
         self.playing = True
-        self.speed = 4            # sim steps per rendered frame (the FLA dial)
+        # sim steps per rendered frame (the FLA dial). `run_live.py --speed` sets the
+        # starting value through the environment, same route as `--set`: a headless
+        # screenshot run has no hands to move the slider, and at 4 steps/frame the
+        # arms worth looking at need minutes of wall clock before anything has
+        # evolved (docs/conventions.md §10 asks for eyes on it, not for patience).
+        self.speed = int(os.environ.get("UNDERWORLD_SPEED", "4"))
+        self.speed = max(1, min(2000, self.speed))
         self.frame = 0
         self.total_steps = 0
         self.metrics: dict = {}
@@ -71,10 +77,13 @@ class Simulation:
         armor = np.asarray(armor_of(s.genome, self.cfg))
         spike = np.asarray(spike_of(s.genome, self.cfg))
         venom = np.asarray(s.venom)              # per-agent debuff, already on state
+        # The ecotype axis (docs/multispecies_feasibility.md §17/§18). Same shape as
+        # `size_of` above -- a pure read off the genome, no state and no cost.
+        forage = np.asarray(forage_pref_of(s.genome, self.cfg))
         self.snapshot = protocol.encode(
             self.frame,
             np.asarray(s.alive), np.asarray(s.pos), np.asarray(s.diet),
-            np.asarray(s.energy), size, armor, spike, venom,
+            np.asarray(s.energy), size, armor, spike, venom, forage,
             np.asarray(s.plant), np.asarray(s.fruit),
             self.cfg.grid, self.cfg.world_size, self.cfg.plant_max,
             self.cfg.fruit_max, self.metrics,
