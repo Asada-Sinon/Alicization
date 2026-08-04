@@ -129,5 +129,5 @@ R9（§10）测到过「结构化草层造出空间生态型关联」（12/12、
 
 - **不动 `in_dim` / `genome_size` / `trait_dim`** ⇒ **不作废任何已演化种群**；
 - **不碰任何生态参数** ⇒ `scripts/golden.json` 十项不动，**不需要 `--bless`**
-  （`check.py --full` 42 项已复核）；
+  （`check.py --full` **47 项**已复核；比上一轮多的 5 项就是 §3 的 `check_agent_stride`）；
 - `forage_pref_of` 是纯函数读既有基因，每帧一次 device→host，与 `size_of` 同量级。
