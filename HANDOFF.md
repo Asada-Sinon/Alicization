@@ -62,10 +62,20 @@
 - **PENDING（下次第一件事）**: 等 `grep -l '^JSON '` 数到 **24/24**，
   跑 `XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python
   explorations/20260804-readouts/analyze_r18.py`，按 `multispecies_program.md`
-  **§21.4 出判决**写进 `multispecies_feasibility.md`。
-  **判决要点先记住**：报**实测跨代数**、不许写成「450 代」；崩溃 run 分开报；
-  `retained_occ` 已知饱和、**不进主判据**；比值 <1 判 undecidable
-  （但本轮预测效应÷MDE=18.6，真落那里本身就是结论）。
+  **§21.4 + 新增的 §21.4b 出判决**写进 `multispecies_feasibility.md`。
+  **⚠️ §21.4b 是本轮新写的，判决前必读**（`f390945`）：
+  - **H2 不是独立判据**——`split_score` 的谷深因子实测恒为 1.0000（4488/4488），
+    晚窗上 `split_score ≡ 1 − low_mass` **精确成立**（残差 0.00000、3501 个检查点）。
+    **不许把「H1 上升 + H2 下降」报成两条互相矛盾的发现，那是把一个数报了两遍。**
+    （R16 的 H2 是同一个失误的第一次。）
+  - **实测是显著为正**（8/24 上 Δ+0.0665、4/4、比值+4.67），而 §21.4 只为
+    「≈0 / 显著为负 / 比值<1」写了解读。§21.4b 已把这一格的解读**在看到全部数据
+    之前**写死：`low_mass` 上升 = **果专精侧占比上升**，不是衰减；
+    **两个轴分开报**——「双簇还在不在」看两峰/谷深/`retained`，
+    「对称性漂到哪」才看 `low_mass`。
+  - 报**实测跨代数**（8/24 上是 **376 [351, 424]**），**不许写成「450 代」**；
+    崩溃 run 分开报；`retained_occ` 已知饱和、**不进主判据**。
+  - 再跑一次 `diag_h2_degenerate.py`（24 run 上的数会变，结论未必变）。
 
 - **坑**: `analyze_r18.py` 里 `np.mean([])` 会在某个 seed 两个 rep 全缺时发
   RuntimeWarning 并返回 nan——**这是保守方向**（nan 会被 `report()` 的
