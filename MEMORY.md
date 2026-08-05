@@ -527,3 +527,31 @@
   四分位表在架上又躺了一整天。
 - 来源: Session 2026-08-05（R18 跑到 8/24 时），详见 `multispecies_program.md` §21.4b
   与 `multispecies_feasibility.md` §19 的勘误块
+
+### [LEARN:env] **harness 的后台任务有时限，长分析要用 `nohup` 脱离**
+- 现象: `analyze_r18.py` 的 H3（24 run × 200 reps × 4 个 `Ne`，实测约 40 分钟）
+  用 `run_in_background: true` 起了两次，**两次都在跑到一半时被 kill**
+  （status 是 `killed` 而不是 `completed`，输出停在第一个 `Ne`）。
+  连那个只做 `grep + sleep 30` 的**轻量等待器也被 kill 了**，所以不是资源问题，
+  是时限。
+- 原因: harness 管理的后台任务有统一时限，与任务本身多轻无关。
+  **它的失败方式不难看出来**（notification 明写 `killed`），但如果只看输出文件、
+  不看 status，就会把「跑到一半被砍」误读成「分析结果就是这样」——
+  H3 只打出四个 `Ne` 中的第一个，而那一个恰好也拒绝中性，看起来像一份完整结论。
+- 对策: ①**超过约半小时的计算用 `nohup bash -c '...' > out.txt 2>&1 &` 完全脱离
+  harness**，再用 `kill -0 <pid>` 查活；②**等它的时候不要靠后台等待器**
+  （它自己也会被 kill），直接把 `ScheduleWakeup` 设在预计完成之后接手；
+  ③**任何「跑完了」的判断都要查文件里的结束标记**（这里是脚本最后那行
+  `[判决由 result-analyst 出]`），不能只看文件非空。
+- 来源: Session 2026-08-05（R18 判决时）
+
+### [LEARN:env] 这台机器的 shell 是 **zsh，不做 word splitting**
+- 现象: `FILES="a b c"; for f in $FILES` 在 zsh 里拿到的是**整个字符串**，
+  于是 `[ -e "$f" ]` 对一个由六个路径拼成的「文件名」求值，判为不存在。
+- 原因: zsh 默认关闭 `SH_WORD_SPLIT`，这与 bash 相反。
+  写 `bash -c` 里的脚本没问题，直接在 Bash 工具里跑的命令是 zsh。
+- 对策: 用数组 `FILES=(a b c)` + `"${FILES[@]}"`。
+  **这次它没造成伤害，恰恰是因为那个检查写了「路径不存在就 exit 1」**
+  ——如果它写成「静默跳过不存在的路径」，就会报告「所有文件都没变」，
+  而那正是我要用它证明的结论。**守卫的失败模式必须比它守的东西更吵**（见上）。
+- 来源: Session 2026-08-05（R18 判决的 provenance 核查）
