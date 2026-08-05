@@ -149,10 +149,22 @@ def main():
     a, b = mk(lm)
     report(cells(R, a), cells(R, b), within(R, a), "low_mass",
            "§21.3 跑前算死：σ̂_W=0.0093、预测效应÷MDE=18.6")
+    # 恒等式的吻合度**当场算**，不写死。
+    # 硬编码一个百分比就等于埋一个会过期的数：8/24 时是 94.4%、16/24 时是 94.6%，
+    # 判决用 24 run 时又是别的。本 session 已经为这种过期常数付过两次账
+    # （`split_score` 的 0.4423 漏改三处、§19 的四分位表）。
+    _H = np.concatenate([rec["hist"] for rec in R.values()])
+    _lm = _H[:, LOW].sum(1) / np.maximum(_H.sum(1), 1.0)
+    _ss = np.array([split_score(h, CTR)[0] for h in _H])
+    _res = np.abs(_ss - np.minimum(_lm, 1.0 - _lm))
+    _exact, _cross = float(np.mean(_res < 1e-9)), float(np.mean(_lm < 0.5))
+
     print()
     print("  H2：`split_score` 同口径")
     print("  ⚠️ **§21.4b：H2 不是 H1 之外的独立证据。** 谷见底的干净双峰上")
-    print("     `split_score ≡ min(low_mass, 1 − low_mass)`（实测精确成立 94.4%），")
+    print(f"     `split_score ≡ min(low_mass, 1 − low_mass)`（**本次数据实测精确成立")
+    print(f"     {100 * _exact:.1f}%**，{len(_H)} 个检查点，|残差| 均值 {_res.mean():.5f}；")
+    print(f"     其中 {100 * _cross:.1f}% 的检查点 `low_mass < 0.5`，落在尖点另一侧），")
     print("     所以下面这条在 `low_mass > 0.5` 时必然与 H1 反号。**它测的是")
     print("     「离 50/50 有多远」，不是「分裂有多强」**——按对称性读数解释，")
     print("     不许和 H1 并排当两条互相矛盾的发现。诊断见")
