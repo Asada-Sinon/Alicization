@@ -62,12 +62,10 @@ def load():
         rec = {"name": b[0] + "_" + b[1] + "_" + b[2], "hist": h,
                "gen": np.array([q["generation"] for q in tr], float),
                "collapsed": bool(d["collapsed"])}
-        (bad if rec["collapsed"] else R).setdefault(0, None)
         if rec["collapsed"]:
-            bad.append(rec)
+            bad.append(rec)          # §21.5：崩溃 run 分开报，不池化
         else:
             R[(int(b[1][1:]), int(b[2][1:]))] = rec
-    R.pop(0, None)
     return R, bad
 
 
