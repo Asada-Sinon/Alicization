@@ -43,7 +43,7 @@ def wmean(v, g, m):
 
 def main():
     nseg = int(sys.argv[1]) if len(sys.argv) > 1 else 6
-    segs, gends, names = [[] for _ in range(nseg)], [], []
+    segs, gends, keys = [[] for _ in range(nseg)], [], []
     for f in sorted(glob.glob(f"{RUN_DIR}/*.log")):
         txt = open(f).read()
         if "JSON " not in txt:
@@ -57,11 +57,12 @@ def main():
         lm = [h[LOW].sum() / max(h.sum(), 1.0) for h in H]
         gm = g.max()
         gends.append(gm)
-        names.append(f.split("/")[-1][:-4])
+        b = f.split("/")[-1][:-4].split("_")
+        keys.append((int(b[1][1:]), int(b[2][1:])))
         for i in range(nseg):
             m = (g >= gm * i / nseg) & (g < gm * (i + 1) / nseg + (1e-9 if i == nseg - 1 else 0))
             segs[i].append(wmean(lm, g, m))
-    if not names:
+    if not keys:
         print("没有已完成的 run —— 不是结论，是没数据。")
         sys.exit(1)
 
@@ -86,15 +87,54 @@ def main():
     print(f"  增量之比    {[f'{v:.3f}' for v in ratios]}   ← 全 <1 才叫减速")
     print()
 
-    print("  **最硬的那一条：最后一段的增量还显著为正吗**（配对，逐 run）")
+    print("  **最硬的那一条：最后一段的增量还显著为正吗**")
+    print("     ⚠️ **分析单位必须是格均值，不是 run**（`CLAUDE.md`：先把 r 个重复平均成")
+    print("        格均值，再对 s 个格做配对检验；把 s×r 个 run 当独立样本是错的）。")
+    #
+    # **初版就是这么错的**：直接对 24 个 run 做 wilcoxon，得 21/24、p=0.00065，
+    # 而协议口径（12 格）是 9/12、p=0.00684。复核（fable5，2026-08-06）抓到的。
+    seeds = sorted({s for s, _ in keys})
+    C = np.array([[np.nanmean([A[i][k] for k, (s, _) in enumerate(keys) if s == sd_])
+                   for sd_ in seeds] for i in range(nseg)])          # [nseg, ncell]
+    lastC = C[-1] - C[-2]
+    finC = np.isfinite(lastC)
+    pC = wilcoxon(C[-1][finC], C[-2][finC]).pvalue if np.any(lastC[finC] != 0) else float("nan")
+    # 比值：√2·σ̂_W/√r，σ̂_W 从重复内自估（`CLAUDE.md` 强制报）
+    w = [np.std([A[-1][k] - A[-2][k] for k, (s, _) in enumerate(keys) if s == sd_], ddof=1)
+         for sd_ in seeds if sum(1 for s, _ in keys if s == sd_) >= 2]
+    sw = float(np.sqrt(np.nanmean(np.array(w, float) ** 2))) if w else float("nan")
+    noise = np.sqrt(2) * sw / np.sqrt(2)
+    ratio = np.nanmean(lastC) / noise if np.isfinite(noise) and noise > 1e-9 else float("nan")
+    print(f"    **[协议口径] {len(seeds)} 格**  Δ 均值 {np.nanmean(lastC):+.5f}   "
+          f"{int((lastC[finC] > 0).sum())}/{int(finC.sum())} 为正   "
+          f"p={pC:.5f}（地板 {wilcoxon_p_floor(int(finC.sum())):.5f}）")
+    print(f"      σ̂_W={sw:.5f}  配对差噪声={noise:.5f}  **比值 {ratio:+.2f}**"
+          f"{'   ** <1，判 underpowered **' if abs(ratio) < 1 else '（≥1，过闸）'}")
+    print(f"      逐格 {np.round(lastC, 4).tolist()}")
     last = A[-1] - A[-2]
     fin = np.isfinite(last)
-    p = wilcoxon(A[-1][fin], A[-2][fin]).pvalue if np.any(last[fin] != 0) else float("nan")
-    print(f"    Δ(第{nseg}段 − 第{nseg - 1}段) 均值 {np.nanmean(last):+.4f}   "
-          f"{int((last[fin] > 0).sum())}/{int(fin.sum())} 为正   "
-          f"p={p:.5f}（地板 {wilcoxon_p_floor(int(fin.sum())):.5f}）")
-    print(f"    逐 run {np.round(last, 4).tolist()}")
-    print(f"    对比第一段增量 {d[0]:+.4f} ⇒ 末段是它的 **1/{d[0] / max(np.nanmean(last), 1e-9):.0f}**")
+    print(f"    [对照，**不是判据**] 逐 run {int((last[fin] > 0).sum())}/{int(fin.sum())} 为正"
+          f"——分析单位错了会把 {int((lastC[finC] > 0).sum())}/{int(finC.sum())} 说成这个数")
+    print(f"    对比第一段增量 {d[0]:+.4f} ⇒ 末段是它的 **1/{d[0] / max(np.nanmean(lastC), 1e-9):.0f}**")
+
+    # ---- 少数簇质量：gap≡1 时它才是「双簇撑住吗」的直接量 ----------------------
+    #
+    # `split_score` 的 docstring 原话是「干净分裂时 ≈ 少数簇的质量」，而本世界
+    # gap 恒为 1（窗内），所以 `min(lm, 1−lm)` **就是**少数簇质量。
+    # `low_mass` 上升的同时少数簇在缩小——判决必须报这一条（复核 fable5 指出）。
+    print()
+    print("  **少数簇质量 `min(low_mass, 1−low_mass)`**（`gap≡1` 时它就是分裂强度本身）")
+    Cm = np.minimum(C, 1.0 - C)
+    mum = Cm.mean(1)
+    print(f"    逐段 {[f'{v:.4f}' for v in mum]}")
+    peak = float(mum.max())
+    print(f"    峰值 {peak:.4f}（第 {int(mum.argmax()) + 1} 段）→ 末段 {mum[-1]:.4f}   "
+          f"**绝对 {mum[-1] - peak:+.4f}、相对 {100 * (mum[-1] - peak) / peak:+.1f}%**")
+    lastm = Cm[-1] - Cm[-2]
+    fm = np.isfinite(lastm)
+    pm = wilcoxon(Cm[-1][fm], Cm[-2][fm]).pvalue if np.any(lastm[fm] != 0) else float("nan")
+    print(f"    末段增量 {np.nanmean(lastm):+.5f}   {int((lastm[fm] > 0).sum())}/{int(fm.sum())} 为正"
+          f"   p={pm:.5f}")
     print()
 
     r = float(np.mean(ratios[-2:])) if len(ratios) >= 2 else float("nan")
