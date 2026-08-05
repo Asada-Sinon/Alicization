@@ -38,7 +38,8 @@ elevation, so one brain works whether it's grazing or hunting, uphill or down.
 `peer` is the complementary construction — diet *similarity* rather than difference
 — because prey/predator are both exactly zero between two agents of the same diet,
 which left conspecifics mutually invisible and blocked every form of social
-behaviour. Total input width is 67; the genome is 1381 floats.
+behaviour. Total input width is 67; the genome is **1386** floats — 1378 brain weights plus
+8 trait genes.
 
 **Memory.** Two tiers. The short one is the recurrent hidden state; the long one is
 four slots of `(dx, dy, strength)` — two for water, two for fruit — stored as
@@ -52,21 +53,68 @@ can't subsist on plants at all. A kill hydrates as well as feeds.
 
 **Genetics.** Mutation plus uniform crossover of brain genes, with mates matched
 assortatively by diet so recombination mixes within a species rather than blurring
-the herbivore/carnivore split back to omnivore. Three traits are heritable besides
-the brain: `diet`, per-offspring `invest`ment, and body `size`. Each of the four
-layers that hold the diet split apart is an independently ablatable switch — which
-is how we found out the split is **not** a pure product of selection (see
-`docs/experiments.md`).
+the herbivore/carnivore split back to omnivore. **Eight traits are heritable besides
+the brain**, and they arrived one experiment at a time rather than by design:
+
+| gene | what it does | where it came from |
+| --- | --- | --- |
+| `diet` | 0 = herbivore, 1 = carnivore | the original food web |
+| `invest` | energy handed to each offspring | life-history |
+| `size` | body scale | allometry |
+| `attack` / `escape` | predator reach vs prey evasion | a measurable **red-queen** dynamic (`docs/attack_range_redqueen.md`) |
+| `armor` / `spike` | damage reduction / retaliation | visible morphological defence (`docs/trait_defense_landing.md`) |
+| `forage_pref` | a grass ↔ fruit dial | resource partitioning — see *What we found* below |
+
+Each of the four layers that hold the diet split apart is an independently ablatable
+switch — which is how we found out the split is **not** a pure product of selection
+(see `docs/experiments.md`).
+
+**Other live mechanisms.** A day–night clock (nocturnal ambush, no explicit clock
+input — the brain has to build its own), a scent-like **fear field** deposited by
+carnivores and folded into the predator channel, carrion left by kills, and an
+assortative-mating knob that can also sort by `forage_pref`.
 
 **Dashboard.** Live WebGL view of the world, time-series telemetry, and a per-agent
 inspector that shows what the selected creature is actually seeing (its retina) and
-the state of its recurrent memory.
+the state of its recurrent memory. Herbivores are also tinted along the grass↔fruit
+axis, and a live histogram shows the foraging-ecotype distribution — so a world that
+has split into two ecotypes now *looks* different from one that has not
+(`docs/forage_visualization.md`).
 
 Deferred: true two-parent-cost sexual reproduction, multi-GPU `shard_map`,
 checkpointing. **There is no checkpoint migration**, so any change to `in_dim` or
 `genome_size` restarts every evolved brain from random — which is why such changes
 get batched into a single deliberate population invalidation rather than made one
 at a time.
+
+## What we found
+
+The point of the sandbox is that it produces falsifiable answers, including
+unwelcome ones. Every claim below is a committed verdict with per-seed numbers,
+a pre-registered criterion written before the run, and an explicit list of what it
+does **not** license (`docs/multispecies_feasibility.md`, `docs/multispecies_program.md`).
+
+- **A red-queen dynamic is real but bounded.** Heritable attack reach and prey escape
+  co-evolve; the arms race is a *transient toward a shared equilibrium*, not a runaway
+  — the prediction that two-sided evolution would raise variance was **falsified**.
+- **Armour evolves; spikes don't.** The first visible morphological defence to emerge
+  here did so on its own; its sibling trait was falsified in the same run.
+- **A second herbivore ecotype exists, and it is not a drift artefact.** After nine
+  accumulated interventions, the grass/fruit preference splits into a clean ~50/50
+  bimodal distribution with an empty middle. A simulated neutral null (drift plus
+  recurrent mutation, calibrated `Ne`) **cannot produce it**: 16 of 16 arm × `Ne`
+  cells reject at p < 0.005, and it still rejects at ~148 generations.
+- **Turning off the predator channel releases it; doubling fruit supply only slides
+  the whole distribution.** Two interventions with the same effect on one readout do
+  **different things** — a distinction the occupancy readout alone cannot see.
+- **Imposed assortative mating raises whole-genome divergence between the two clusters
+  by 47.8%** — and costs about 5.6% of the population. That is *"if isolation exists,
+  then X"*, **not** *"speciation emerged"*: the mating rule is a constant we turned on,
+  not something that evolved.
+
+Negative and retracted results are kept, not quietly dropped. One verdict in this
+chain was **withdrawn** after two readout bugs were found — the evidence was void,
+not the conclusion wrong — and the retraction is archived next to the original text.
 
 ## Setup
 
@@ -174,7 +222,7 @@ proposal — and negative results are kept rather than quietly dropped.
 | `docs/biology.md` | Real-world ecology and behaviour the design leans on: piosphere effect, edible biomass, preformed water, spatial memory, the Weismann barrier, Type III survivorship, why parental care evolves. |
 | `docs/mortality.md` | Death-cause decomposition and competing-risks censoring. The denominator for every other document. |
 | `docs/experiments.md` | Mechanisms that were built, measured, and **did not work** — the fruit layer, both signs of the trampling feedback, dismantling the diet split. The most load-bearing file here: it is what stops the same idea being re-attempted. |
-| `docs/trait_evolution.md` | What can and cannot evolve today (1378 of 1381 genome floats are brain weights; only 3 are body), the evolution of evolvability, the open-endedness ceiling, and why the body-size gene was falsified in the wrong direction. |
+| `docs/trait_evolution.md` | What can and cannot evolve today (1378 of **1386** genome floats are brain weights; only **8** are body/physiology |
 | `docs/three_d.md` | Going 3D: render-only vs discrete strata vs true 3D, with measured benchmarks and a from-scratch encounter-rate derivation validated against three independent prototypes. |
 | `docs/carnivore_riparian.md` | Why predators camp on the rivers, why the "too many herbivores" intuition is backwards, and five candidate ecological retunes. |
 

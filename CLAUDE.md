@@ -378,7 +378,9 @@ before touching the golden bands.
 **Dead code note:** `ecology.prey_field` and the sine-stream helpers are gone;
 `ecology.gradient` is live again as the terrain slope operator.
 
-**`README.md` is stale** — it describes the M0 vertical slice (MLP brain, food-gradient
-sensing, asexual reproduction). The code has since gained a recurrent brain, retina
-vision, predator-prey with neighbour-based predation, a water/thirst mechanic with a
-meandering stream, and genetic crossover. Trust the source over the README.
+**`README.md` was refreshed on 2026-08-05** and now matches the code: recurrent brain,
+retina, terrain, the eight trait genes, day/night, the fear field, and a *What we
+found* section carrying the committed verdicts. The warning that used to live here
+("stale, describes the M0 vertical slice") **was itself stale** — the README had
+already been rewritten and nobody updated the warning. Still trust the source over
+any prose, but the README is no longer a known-bad starting point.
