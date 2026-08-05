@@ -132,7 +132,11 @@ def _ld_fn(cfg):
         ok = (nlo >= 30.0) & (nhi >= 30.0)
         mean_d = jnp.where(ok, jnp.sum(d * keep) / jnp.sum(keep), jnp.nan)
         traits = jnp.where(ok, d[bp:bp + 7], jnp.nan)   # diet/invest/size/attack/escape/armor/spike
-        return mean_d, traits, nlo, nhi
+        # **分子与分母各回传一个**（R17 §20.1 留下的 undecidable）：`d = |Δμ| / σ_pooled`，
+        # 只存比值就分不开「两簇真的分化」与「簇内方差被压小」。两个浮点就能补掉。
+        num = jnp.where(ok, jnp.sum(jnp.abs(mhi - mlo) * keep) / jnp.sum(keep), jnp.nan)
+        den = jnp.where(ok, jnp.sum(sp * keep) / jnp.sum(keep), jnp.nan)
+        return mean_d, traits, nlo, nhi, num, den
     return f
 
 
@@ -231,10 +235,11 @@ def main(steps, seed, overrides, as_json, checkpoints):
             }
             # 连锁不平衡：两个觅食簇在非 `forage_pref` 基因上的分化（§20 的 H1）。
             # 设备上算，只回传 9 个浮点。
-            _md, _tr, _nlo, _nhi = ld_fn(state.genome, state.alive, state.diet)
+            _md, _tr, _nlo, _nhi, _num, _den = ld_fn(state.genome, state.alive, state.diet)
             cp["ld_mean_abs_d"] = float(_md)
             cp["ld_trait_d"] = [float(v) for v in np.asarray(_tr)]
             cp["ld_n_lo"], cp["ld_n_hi"] = int(_nlo), int(_nhi)
+            cp["ld_num"], cp["ld_den"] = float(_num), float(_den)
             # **通量三件套：操作检查（manipulation check）用的**。
             # `§13.7`/`§16.3` 说「资源比固定在 11%」是**承载**口径；而这个世界实测的
             # **供给通量**配比早就是 ~1:2（`T05` 各 run 的 `frugivory_frac` = 0.31–0.44）。

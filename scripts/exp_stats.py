@@ -255,9 +255,24 @@ class PairedResult:
     observed_sd: float        # 实测配对差 SD
 
     @property
+    def saturated(self) -> bool:
+        """噪声 ≈ 0 ⇒ 比值无定义。**读数在这个臂上已经没有分辨率了。**
+
+        典型成因是处理把某个有界读数推到它的上界（占空比顶到 1.0），于是格内 SD
+        **恰好是 0**。这不是「噪声很小」，是**没有噪声可测**。
+        """
+        return not np.isfinite(self.ratio)
+
+    @property
     def underpowered(self) -> bool:
-        """比值 <1 → 功效不足，**哪怕 p 过线也必须标注**（口径 2）。"""
-        return abs(self.ratio) < 1.0
+        """比值 <1 → 功效不足，**哪怕 p 过线也必须标注**（口径 2）。
+
+        ⚠️ **饱和（比值为 NaN）也算功效不足。** 初版写的是 `abs(self.ratio) < 1.0`，
+        而 `abs(nan) < 1.0` 是 **False** ——于是一个**饱和到没有分辨率**的读数
+        会被报成「功效充足」，连警告都不打。这个洞在 R16 的 H2、R16 的 H3 口径 A、
+        R17 的 `retained_occ` 上**连续出现三次**都没被发现，正是因为它不报警。
+        """
+        return self.saturated or abs(self.ratio) < 1.0
 
     @property
     def at_floor(self) -> bool:
@@ -279,10 +294,14 @@ class PairedResult:
             f"  95% bootstrap CI (B={BOOTSTRAP_B}, 配对差均值) = [{lo:+.5f}, {hi:+.5f}]  "
             f"{'不含 0' if lo * hi > 0 else '**含 0**'}",
             f"  效应量: Cohen dz = {self.dz:+.3f}   匹配对秩双列 r_rb = {self.r_rb:+.3f}",
-            f"  效应/噪声比 (自估配对差噪声 {self.noise:.6f}) = {self.ratio:+.3f}"
-            f"{'   ** <1，功效不足 **' if self.underpowered else ''}",
-            f"  配对差实测 SD = {self.observed_sd:.6f} vs 仅噪声预测 {self.noise:.6f} "
-            f"-> 实测/预测 = {self.observed_sd / self.noise:.2f}",
+            (f"  效应/噪声比 = **无定义（读数饱和：自估噪声 {self.noise:.2e} ≈ 0）**"
+             if self.saturated else
+             f"  效应/噪声比 (自估配对差噪声 {self.noise:.6f}) = {self.ratio:+.3f}"
+             f"{'   ** <1，功效不足 **' if self.underpowered else ''}"),
+            (f"  配对差实测 SD = {self.observed_sd:.6f}（噪声为 0，比不出「实测/预测」）"
+             if self.saturated else
+             f"  配对差实测 SD = {self.observed_sd:.6f} vs 仅噪声预测 {self.noise:.6f} "
+             f"-> 实测/预测 = {self.observed_sd / self.noise:.2f}"),
         ]
         return "\n".join(lines)
 
@@ -322,7 +341,9 @@ def _paired_core(
         dz=dz,
         r_rb=r_rb,
         noise=noise,
-        ratio=float(d.mean() / noise) if noise > 0 else float("nan"),
+        # `noise > 0` 不够：1e-300 的噪声会除出一个巨大的比值，看起来像「效应极强」
+        # 而实际是分辨率耗尽。用一个有意义的下限。
+        ratio=float(d.mean() / noise) if noise > 1e-9 else float("nan"),
         observed_sd=sd_d,
     )
 
