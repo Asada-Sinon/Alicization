@@ -162,6 +162,25 @@ def main():
            "§21.3 跑前算死：σ̂_W=0.0072；⚠️ 这个 σ̂_W 比 low_mass 的 0.0093 小 23%，"
            "是 min 在尖点附近压缩了方差，不是它更精确 —— 比值会虚高")
     print()
+    print("  §21.4b 的**第二个轴**：双簇还在不在（与上面的对称性轴分开报）")
+    print("     `low_mass` 和 `split_score` 都只说「离 50/50 有多远」。要问「双簇还在不在」")
+    print("     得用别的量。恒等式残差 |ss − min(lm,1−lm)| 正好是**谷没见底的程度**，")
+    print("     而它**独立于 low_mass**（干净双峰恒为 0；§18.4 的 `R50p` 偏离 0.067）。")
+    print("     ⚠️ **这两条预期会饱和**（8/24 实测：恒为 1.0000 与 0.0000，噪声 0）。")
+    print("        所以它们**不是**用来做统计检验的——`conventions.md` §11 已经写死")
+    print("        饱和的读数不能当判据的分母，下面的「比值」会正确地报「无定义」。")
+    print("        **它们是监测器**：只要有任何一个 run 的两簇开始并合、或谷里重新")
+    print("        积起质量，它们就会脱离饱和。饱和本身就是本轴的答案（定性，非检验）。")
+    a4, b4 = mk(lambda h: float(not np.isnan(split_score(h, CTR)[1])))
+    report(cells(R, a4), cells(R, b4), within(R, a4), "两峰都找到的占比",
+           "1.0 = 每个检查点都找得到两个局部极大；**掉下来就是簇在并合**")
+    a5, b5 = mk(lambda h: abs(split_score(h, CTR)[0]
+                              - min(h[LOW].sum() / max(h.sum(), 1.0),
+                                    1 - h[LOW].sum() / max(h.sum(), 1.0))))
+    report(cells(R, a5), cells(R, b5), within(R, a5), "谷未见底度",
+           "0 = 谷完全空；**升高才是「分裂在变糙」**，而 split_score 下降不是")
+
+    print()
     print("  次读数（不进主判据，§21.4 + conventions §11：已知饱和）")
     a3, b3 = mk(rt)
     report(cells(R, a3), cells(R, b3), within(R, a3), "retained 占空比",
