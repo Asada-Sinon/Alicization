@@ -151,9 +151,16 @@ def main():
            "§21.3 跑前算死：σ̂_W=0.0093、预测效应÷MDE=18.6")
     print()
     print("  H2：`split_score` 同口径")
+    print("  ⚠️ **§21.4b：H2 不是 H1 之外的独立证据。** 谷见底的干净双峰上")
+    print("     `split_score ≡ min(low_mass, 1 − low_mass)`（实测精确成立 94.4%），")
+    print("     所以下面这条在 `low_mass > 0.5` 时必然与 H1 反号。**它测的是")
+    print("     「离 50/50 有多远」，不是「分裂有多强」**——按对称性读数解释，")
+    print("     不许和 H1 并排当两条互相矛盾的发现。诊断见")
+    print("     `explorations/20260805-r18-verdict/diag_h2_degenerate.py`。")
     a2, b2 = mk(ss)
     report(cells(R, a2), cells(R, b2), within(R, a2), "split_score",
-           "§21.3 跑前算死：σ̂_W=0.0072")
+           "§21.3 跑前算死：σ̂_W=0.0072；⚠️ 这个 σ̂_W 比 low_mass 的 0.0093 小 23%，"
+           "是 min 在尖点附近压缩了方差，不是它更精确 —— 比值会虚高")
     print()
     print("  次读数（不进主判据，§21.4 + conventions §11：已知饱和）")
     a3, b3 = mk(rt)
