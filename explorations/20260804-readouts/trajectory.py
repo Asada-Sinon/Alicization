@@ -75,9 +75,24 @@ WIN_EVERY = 10
 MIN_HERB = 30              # 低于这个数判为崩溃
 
 
+# R19（`multispecies_program.md` §22）：`mate_forage` 基因的读数。
+#
+# **必须记原始基因，不是映射后的 `w`**（§22.4）：`mate_forage_of` 是单边
+# `clip(sigmoid(g)−0.5, 0, None)`，纯漂变下 `mean w` 会 by-construction 从 0 往上漂
+# （实测：基因完全不被读的臂上 `mean w` 已是 0.0346）。`mean gene` 才是鞅。
+#
+# **阈值 0.847 = 入侵正收益区的下界**（§22.4c 实测：`w≤0.10` 的选择系数 ≈0 甚至 −0.003，
+# `w=0.20` 跳到 +0.047；`w=0.2 ⇒ gene=0.847`）。记「越过它的个体占比」是因为
+# **`mean gene` 会把「10% 冲上去、90% 不动」平均成「几乎没动」**——而那恰恰是
+# 正反馈点火的样子。
+MF_THRESH = 0.847
+MF_BINS = np.linspace(-3.0, 3.0, 21)      # 基因是实数；初始 N(0,0.4)、669 代后 SD≈0.67
+
+
 def _hist_fn(cfg):
-    """设备上算食草者的 `forage_pref` 直方图，只传 14 个浮点回主机。"""
+    """设备上算食草者的 `forage_pref` 直方图 + R19 的 `mate_forage` 基因读数。"""
     lo, w, nb = float(BINS[0]), float(BINS[1] - BINS[0]), len(CTR)
+    mlo, mw, mnb = float(MF_BINS[0]), float(MF_BINS[1] - MF_BINS[0]), len(MF_BINS) - 1
 
     @jax.jit
     def f(genome, alive, diet, generation):
@@ -86,7 +101,14 @@ def _hist_fn(cfg):
         idx = jnp.clip(((p - lo) / w).astype(jnp.int32), 0, nb - 1)
         h = jnp.zeros(nb).at[idx].add(herb.astype(jnp.float32))
         gen = jnp.sum(jnp.where(alive, generation, 0.0)) / jnp.maximum(jnp.sum(alive), 1)
-        return h, jnp.sum(herb), gen
+        # --- R19 读数（食草者谱系，生态型住在那里）---
+        mg = genome[:, cfg.mate_forage_index]
+        nh = jnp.maximum(jnp.sum(herb), 1)
+        mf_mean = jnp.sum(jnp.where(herb, mg, 0.0)) / nh          # H1 的主读数
+        mf_above = jnp.sum(jnp.where(herb & (mg > MF_THRESH), 1.0, 0.0)) / nh
+        midx = jnp.clip(((mg - mlo) / mw).astype(jnp.int32), 0, mnb - 1)
+        mf_hist = jnp.zeros(mnb).at[midx].add(herb.astype(jnp.float32))
+        return h, jnp.sum(herb), gen, mf_mean, mf_above, mf_hist
     return f
 
 
@@ -168,8 +190,10 @@ def main(steps, seed, overrides, as_json, checkpoints):
     collapsed = False
 
     def snapshot():
-        h, nh, gen = hist_fn(state.genome, state.alive, state.diet, state.generation)
-        return np.asarray(h), int(nh), float(gen)
+        h, nh, gen, mfm, mfa, mfh = hist_fn(state.genome, state.alive, state.diet,
+                                            state.generation)
+        return (np.asarray(h), int(nh), float(gen),
+                float(mfm), float(mfa), np.asarray(mfh))
 
     while done < steps and not collapsed:
         nxt = min(done + TRAJ_EVERY, steps)
@@ -177,9 +201,11 @@ def main(steps, seed, overrides, as_json, checkpoints):
         at_cp = bool(due)
         state, key, ms = scan_fn(state, key, nxt - done)
         done = nxt
-        h, nh, gen = snapshot()
+        h, nh, gen, mf_mean, mf_above, mf_hist = snapshot()
         d = ms._asdict()
         traj.append({"t": done, "hist": h.tolist(), "n_herb": nh, "generation": gen,
+                     # R19（§22）：append，不 insert——旧的读数脚本按 key 取，不受影响
+                     "mf_mean": mf_mean, "mf_above": mf_above, "mf_hist": mf_hist.tolist(),
                      "population": float(np.asarray(d["population"])[-1]),
                      "carnivore_frac": float(np.asarray(d["carnivore_frac"])[-1]),
                      "split_score": split_score(h, CTR)[0]})
@@ -257,8 +283,11 @@ def main(steps, seed, overrides, as_json, checkpoints):
             out_cps.append(cp)
             fired.update(due)
             # 窗口后补一个轨迹点，否则 `gen_total` 会漏掉窗口里走过的世代
-            hw, nhw, genw = snapshot()
+            hw, nhw, genw, mfm_w, mfa_w, mfh_w = snapshot()
+            # R19：**末检查点是 H1 的主判据**（§22.4），这一条 append 少了这三个字段
+            # 就等于跑完没有数据——差点漏掉。
             traj.append({"t": done, "hist": hw.tolist(), "n_herb": nhw, "generation": genw,
+                         "mf_mean": mfm_w, "mf_above": mfa_w, "mf_hist": mfh_w.tolist(),
                          "population": float("nan"), "carnivore_frac": float("nan"),
                          "split_score": split_score(hw, CTR)[0]})
             print(f"  t={done:>7}  split_score={ss:.4f}  low_mass={cp['low_mass']:.4f}  "
