@@ -116,7 +116,9 @@ def equiv(delta_cells, sd_cells, delta, name, meaning):
     # 否则「等价性成立」读起来像「测到了零」，而它只是「小于本实验的分辨率」。
     print(f"    ⚠️ 该判定的宽严：CI 半宽 {half:.5f} = {half / delta:.2f}·δ ⇒ "
           f"**|效应| < {max(delta - half, 0):.5f} 就会判「停了」**")
-    print(f"       ⇒ 「停了」的含义是 **「残余漂移小于本实验的分辨率」，不是「绝对为零」**")
+    print(f"       ⚠️ δ 是**单个 run** 的噪声尺度，而判定用的是 {len(d)} 个格的均值——")
+    print(f"          CI 半宽 {half:.5f} 才是本实验的分辨率，效应/它 = {abs(d.mean())/max(half,1e-12):.2f}")
+    print(f"          ⇒ 「等价」只等于「小于单 run 噪声」，**不等于「小于分辨率」**")
     print(f"    逐格 Δ = {np.round(delta_cells, 5).tolist()}")
     return d.mean(), (lo, hi), noise
 

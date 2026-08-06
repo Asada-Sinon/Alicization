@@ -51,7 +51,7 @@ class Config:
     retina_sectors: int = 8        # directional vision resolution
     hidden: int = 16               # recurrent hidden units (the fluctlight's memory)
     out_dim: int = 2               # [turn, thrust]
-    trait_dim: int = 8             # non-brain genes; [0] = diet, [1] = investment,
+    trait_dim: int = 9             # non-brain genes; [0] = diet, [1] = investment,
     #                                 [2] = size, [3] = attack_range (predator reach),
     #                                 [4] = escape (prey evasion), [5] = armor (bite-damage
     #                                 reduction), [6] = spike (damage reflected onto the
@@ -68,6 +68,15 @@ class Config:
     #                                 investment but a zero-sum DIAL that trades grass
     #                                 efficiency against fruit efficiency (no ledger tax --
     #                                 the tradeoff itself is the cost), see `forage_tradeoff`.
+    #                                 [8] = mate_forage (how strongly THIS agent sorts mates by
+    #                                 forage_pref instead of diet -- the heritable version of the
+    #                                 `mate_forage_weight` constant, R19 / §22). One-sided like
+    #                                 escape/armor/spike: gene=0 => w=0 => bit-exact old
+    #                                 behaviour. It is a MODIFIER locus (it changes how offspring
+    #                                 genomes are combined, not the carrier's own survival or
+    #                                 fecundity), so selection on it is second-order and the
+    #                                 prior is that it is hard to detect -- §22.2 says so before
+    #                                 the run, not after.
     genome_init_scale: float = 0.4
     food_sample_dist: float = 9.0  # how far ahead each sector samples the plant field
 
@@ -267,6 +276,17 @@ class Config:
     #                                  sensorimotor loop (the brain reads neither field's
     #                                  own efficiency), so like escape/armor recombining
     #                                  it keeps the G-matrix estimator honest.
+    mate_forage_mutation_sigma: float = 0.02  # same slow trait-gene rate as forage_pref.
+    #                                  Deliberately NOT faster: R19 asks whether selection
+    #                                  can raise a modifier locus, and a fast mutation rate
+    #                                  would let drift dominate the answer either way.
+    mate_forage_heritable: bool = False  # False = use the `mate_forage_weight` CONSTANT
+    #                                  (R17's arm, and the default -- bit-exact old code via
+    #                                  a compile-time `if`). True = read the per-agent gene
+    #                                  [8] instead, which is R19. The two are mutually
+    #                                  exclusive: with the gene on, `mate_forage_weight` is
+    #                                  ignored, because "a constant plus a gene" would make
+    #                                  the gene's effect unidentifiable from the constant.
 
     # --- terrain: one elevation field drives mountains, rivers and forest ---
     # h(x,y) = H_local(x) * exp(-d_ridge^2 / 2*sigma^2)          <- the range
@@ -1145,6 +1165,19 @@ class Config:
         adding it leaves every brain weight and prior trait at the same offset, growing
         `genome_size` by one."""
         return self.brain_params + 7
+
+    @property
+    def mate_forage_index(self) -> int:
+        """Column holding the heritable assortative-mating strength (R19,
+        docs/multispecies_program.md §22). Appended after forage_pref -- every brain
+        weight and prior trait keeps its offset, `genome_size` grows by one.
+
+        This is a **modifier locus**: it does not change the carrier's survival or
+        fecundity, only how mates are ranked. `docs/mutation_sigma_heritable.md` is
+        the project's previous verdict on a modifier locus (`mutation_sigma`
+        heritable) -- "mechanism runs but the second-order effect is undetectable".
+        §22.2 records that prior *before* this run."""
+        return self.brain_params + 8
 
     @property
     def attack_max(self) -> float:

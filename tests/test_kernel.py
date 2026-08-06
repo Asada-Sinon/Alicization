@@ -1917,7 +1917,7 @@ def test_trait_gene_indices_are_distinct_and_in_range():
     cfg = Config()
     idxs = [cfg.diet_index, cfg.invest_index, cfg.size_index,
             cfg.attack_index, cfg.escape_index, cfg.armor_index, cfg.spike_index,
-            cfg.forage_pref_index]
+            cfg.forage_pref_index, cfg.mate_forage_index]
     assert len(set(idxs)) == len(idxs), "trait gene indices collide"
     assert min(idxs) == cfg.brain_params, "traits must start right after the brain block"
     assert max(idxs) < cfg.genome_size, "a trait index falls outside the genome"

@@ -17,7 +17,8 @@ import jax.numpy as jnp
 
 from .config import Config
 from .genome import crossover, mutate
-from .state import WorldState, forage_pref_of, invest_of, pos_to_cell, size_of
+from .state import (WorldState, forage_pref_of, invest_of, mate_forage_of, pos_to_cell,
+                    size_of)
 
 
 class Deaths(NamedTuple):
@@ -91,7 +92,8 @@ def cull(state: WorldState, water_damage: jax.Array, cfg: Config):
 
 
 def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config,
-                       key: jax.Array, forage: jax.Array | None = None) -> jax.Array:
+                       key: jax.Array, forage: jax.Array | None = None,
+                       mate_w: jax.Array | None = None) -> jax.Array:
     """For every agent, find another *wanting-to-reproduce* agent with a similar
     diet to serve as a second genetic parent -- assortative by diet so crossover
     mixes brain genes within a species rather than between herbivores and
@@ -129,8 +131,20 @@ def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config,
     """
     n = cfg.n_max
     rank_key = diet if cfg.assortative_mating else jax.random.uniform(key, (n,))
-    if cfg.mate_forage_weight > 0.0 and cfg.assortative_mating:
-        w = cfg.mate_forage_weight
+    _mate_forage_on = cfg.mate_forage_heritable or cfg.mate_forage_weight > 0.0
+    if _mate_forage_on and cfg.assortative_mating:
+        # R19 (§22): `w` becomes PER-AGENT when the gene is on. Everything below is
+        # unchanged -- broadcasting a [n] array where a scalar used to be is the whole
+        # difference, so the `w == 0` agent still sorts by diet exactly as before.
+        #
+        # ⚠️ **§22.3 said "use the mean of the two parents"; that is not implementable
+        # here and the deviation is recorded in §22.3b.** The rank key is what DECIDES
+        # who pairs with whom, so it must be computable before any pairing exists --
+        # a parental mean would need the pairing it is supposed to produce. Using each
+        # agent's own `w` keeps the interaction two-sided anyway: whether A and B end
+        # up rank-adjacent depends on BOTH keys, so a w=0 agent queueing by diet and a
+        # w=0.5 agent queueing by forage_pref are exactly what drives them apart.
+        w = mate_w if cfg.mate_forage_heritable else cfg.mate_forage_weight
         cls = (diet >= 0.5).astype(diet.dtype)     # 0 = herbivore, 1 = carnivore
         rank_key = 2.0 * cls + (1.0 - w) * diet + w * forage
     order = jnp.argsort(jnp.where(want, rank_key, jnp.inf))  # wanters first
@@ -169,9 +183,12 @@ def reproduce(state: WorldState, key: jax.Array, cfg: Config,
     k_gen, k_cross, k_pos, k_head, k_hue, k_mate = jax.random.split(key, 6)
 
     # --- build child values for every k (only the is_birth ones are used) ---
-    forage = (forage_pref_of(state.genome, cfg)
-              if cfg.mate_forage_weight > 0.0 else None)
-    mate_idx = _assortative_mate(want, state.diet, cfg, k_mate, forage)[parent_idx]
+    _mate_forage_on = cfg.mate_forage_heritable or cfg.mate_forage_weight > 0.0
+    forage = forage_pref_of(state.genome, cfg) if _mate_forage_on else None
+    # R19: per-agent assortment strength. Only read when the gene is on, so the
+    # default arm and R17's constant arm both pay nothing.
+    mate_w = mate_forage_of(state.genome, cfg) if cfg.mate_forage_heritable else None
+    mate_idx = _assortative_mate(want, state.diet, cfg, k_mate, forage, mate_w)[parent_idx]
     crossed = crossover(state.genome[parent_idx], state.genome[mate_idx], k_cross, cfg)
     child_genome = mutate(crossed, k_gen, cfg)
     # How much to hand over is the parent's own gene, not a global constant.

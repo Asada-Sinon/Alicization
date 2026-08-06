@@ -200,6 +200,28 @@ def forage_pref_of(genome: jax.Array, cfg: Config) -> jax.Array:
     return jax.nn.sigmoid(genome[:, cfg.forage_pref_index])
 
 
+def mate_forage_of(genome: jax.Array, cfg: Config) -> jax.Array:
+    """Per-agent assortative-mating strength w in [0, 0.5]; **0 at gene=0**.
+
+    The heritable version of the `mate_forage_weight` constant (R19,
+    docs/multispecies_program.md §22). One-sided `clip(sigmoid - 0.5, 0, None)` like
+    escape/armor/spike -- "an investment you either buy or not" -- rather than the
+    two-sided `sigmoid` of forage_pref/diet, because there is no meaningful "negative
+    assortment" here: w < 0 would mean *preferring* the other ecotype, which is a
+    different mechanism (disassortative mating), not less of this one.
+
+    **gene = 0 => w = 0 => the ranking key is bit-exact the old diet-only one**, which
+    is what makes the default arm free.
+
+    ⚠️ **Read the GENE, not this, when measuring whether isolation evolved.**
+    Because the map is one-sided, half of every neutral displacement is clipped away,
+    so `mean w` drifts UPWARD from 0 by construction and would be a by-construction
+    false positive. `mean gene` is a martingale under drift. §22.4 writes this down as
+    the main readout requirement; `metrics.mean_mate_forage_gene` is that readout.
+    """
+    return jnp.clip(jax.nn.sigmoid(genome[:, cfg.mate_forage_index]) - 0.5, 0.0, None)
+
+
 def init_state(cfg: Config, key: jax.Array, terrain) -> WorldState:
     k_pos, k_head, k_gen, k_hue, k_plant, k_carn, k_rej = jax.random.split(key, 7)
     n = cfg.n_max

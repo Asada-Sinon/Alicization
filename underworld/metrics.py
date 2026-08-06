@@ -11,6 +11,7 @@ import jax.numpy as jnp
 
 from .config import Config
 from .state import (WorldState, armor_of, attack_range_of, escape_of, forage_pref_of,
+                    mate_forage_of,
                     invest_of, pos_to_cell, size_of, spike_of)
 
 
@@ -126,6 +127,17 @@ class Metrics(NamedTuple):
     graze_gain: jax.Array       # energy the population drew from GRASS this step
     fruit_gain: jax.Array       # energy the population drew from FRUIT this step
     frugivory_frac: jax.Array   # fruit / (grass + fruit); 0 when nothing was eaten
+    # R19 (docs/multispecies_program.md §22): did assortative mating EVOLVE?
+    # **The main readout is the raw GENE, not the mapped `w`.** `mate_forage_of` is
+    # one-sided (`clip(sigmoid-0.5, 0, None)`), so under pure drift half of every
+    # displacement is clipped and `mean w` rises from 0 BY CONSTRUCTION -- it would be
+    # a by-construction false positive. `mean gene` is a martingale under drift, which
+    # is what makes it testable against the neutral null. §22.4 writes this down as a
+    # requirement *before* the run. `mean_mate_forage_w` is reported for description
+    # only and is explicitly NOT a criterion.
+    mean_mate_forage_gene: jax.Array  # population mean of the RAW gene -- the H1 readout
+    herb_mate_forage_gene: jax.Array  # herbivore-lineage mean (the ecotypes live here)
+    mean_mate_forage_w: jax.Array     # mapped strength; DESCRIPTION ONLY, not a criterion
 
 
 def compute(state: WorldState, terrain, deaths, cfg: Config,
@@ -207,6 +219,14 @@ def compute(state: WorldState, terrain, deaths, cfg: Config,
     forage_pref_var = jnp.sum(((forage_pref - mean_forage_pref) ** 2) * alive) / denom
     herb_forage_pref = jnp.sum(forage_pref * is_herb) / herb_n
 
+    # R19: the RAW gene is the readout, the mapped `w` is description only (§22.4).
+    # Read straight from the genome column -- deliberately NOT via `mate_forage_of`,
+    # because that applies the one-sided clip this readout exists to avoid.
+    mate_forage_gene = state.genome[:, cfg.mate_forage_index]
+    mean_mate_forage_gene = jnp.sum(mate_forage_gene * alive) / denom
+    herb_mate_forage_gene = jnp.sum(mate_forage_gene * is_herb) / herb_n
+    mean_mate_forage_w = jnp.sum(mate_forage_of(state.genome, cfg) * alive) / denom
+
     # Intake flux by source. The two gain arrays are the per-agent energy deltas
     # `dynamics.graze` / `dynamics.eat_fruit` returned earlier in this same step,
     # so they are already alive-masked; summing them gives the layer's realised
@@ -275,4 +295,7 @@ def compute(state: WorldState, terrain, deaths, cfg: Config,
         graze_gain=grass_flux,
         fruit_gain=fruit_flux,
         frugivory_frac=jnp.where(plant_flux > 0.0, fruit_flux / plant_flux, 0.0),
+        mean_mate_forage_gene=mean_mate_forage_gene,
+        herb_mate_forage_gene=herb_mate_forage_gene,
+        mean_mate_forage_w=mean_mate_forage_w,
     )

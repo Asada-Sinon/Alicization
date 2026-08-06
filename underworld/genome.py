@@ -52,6 +52,13 @@ def mutate(genome: jax.Array, key: jax.Array, cfg: Config) -> jax.Array:
     # sensorimotor loop (the brain reads neither field's own efficiency), so recombining
     # it keeps the G-matrix estimator honest.
     sigma = sigma.at[cfg.forage_pref_index].set(cfg.forage_pref_mutation_sigma)
+    # Heritable assortative-mating strength (R19, §22): a MODIFIER locus -- it changes
+    # how offspring genomes are combined, not the carrier's own survival. Same slow trait
+    # rate as forage_pref, and NOT crossover-exempt for the same reason (it never enters
+    # the sensorimotor loop). Gene [8] exists whether or not `mate_forage_heritable` is
+    # on; when off it simply drifts unread, which keeps `genome_size` -- and therefore
+    # the golden band -- identical across both arms of R19.
+    sigma = sigma.at[cfg.mate_forage_index].set(cfg.mate_forage_mutation_sigma)
     return genome + jax.random.normal(key, genome.shape) * sigma
 
 
