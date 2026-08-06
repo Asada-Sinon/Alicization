@@ -106,10 +106,17 @@ def equiv(delta_cells, sd_cells, delta, name, meaning):
         verdict = "**undecidable（CI 跨过阈值边界）**"
     print(f"  {name}: Δ {d.mean():+.5f}   {int((d > 0).sum())}/{len(d)} 为正   "
           f"p={p:.5f}（地板 {wilcoxon_p_floor(len(d)):.5f}）")
+    half = (hi - lo) / 2.0
     print(f"    95%CI [{lo:+.5f}, {hi:+.5f}]   δ={delta:.5f}"
           f"（本轮自估 σ̂_W={sw:.5f}）   比值 {ratio:+.2f}"
           f"{'  ** <1，功效不足 **' if abs(ratio) < 1 else ''}")
     print(f"    ⇒ {verdict}   （{meaning}）")
+    # **这个检验有多容易通过**——δ 是用同一批数据自估的噪声，不是独立的实际等价界。
+    # 只要 |效应| < δ − CI半宽 就会判「停了」，所以必须把这个余量摆出来，
+    # 否则「等价性成立」读起来像「测到了零」，而它只是「小于本实验的分辨率」。
+    print(f"    ⚠️ 该判定的宽严：CI 半宽 {half:.5f} = {half / delta:.2f}·δ ⇒ "
+          f"**|效应| < {max(delta - half, 0):.5f} 就会判「停了」**")
+    print(f"       ⇒ 「停了」的含义是 **「残余漂移小于本实验的分辨率」，不是「绝对为零」**")
     print(f"    逐格 Δ = {np.round(delta_cells, 5).tolist()}")
     return d.mean(), (lo, hi), noise
 
