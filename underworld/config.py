@@ -280,6 +280,13 @@ class Config:
     #                                  Deliberately NOT faster: R19 asks whether selection
     #                                  can raise a modifier locus, and a fast mutation rate
     #                                  would let drift dominate the answer either way.
+    mate_forage_random_axis: bool = False  # **诊断对照**（§22.4d），默认关、不影响任何
+    #                                  已有结果。开启后 `rank_key` 的第三项换成每步重抽的
+    #                                  随机数：保留「按 w 的强度改变排队依据」这件事，
+    #                                  但切断该轴与任何可遗传量的关联。用来判断
+    #                                  「w 涨」是隔离的适应度收益，还是「w 高的个体都按
+    #                                  同一条可遗传轴排队、因而互相靠近」的 by-construction
+    #                                  正反馈。
     mate_forage_heritable: bool = False  # False = use the `mate_forage_weight` CONSTANT
     #                                  (R17's arm, and the default -- bit-exact old code via
     #                                  a compile-time `if`). True = read the per-agent gene

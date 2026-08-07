@@ -146,7 +146,13 @@ def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config,
         # w=0.5 agent queueing by forage_pref are exactly what drives them apart.
         w = mate_w if cfg.mate_forage_heritable else cfg.mate_forage_weight
         cls = (diet >= 0.5).astype(diet.dtype)     # 0 = herbivore, 1 = carnivore
-        rank_key = 2.0 * cls + (1.0 - w) * diet + w * forage
+        # **诊断对照（§22.4d）**：把排序轴换成每步重抽的随机数。它保留「按 `w` 的强度
+        # 改变排队依据」这件事本身，但**切断该轴与任何可遗传量的关联**。
+        # 用途：跑前探针发现 `forage_tradeoff=0` 的 H2 对照臂**也在涨**，而它按设计
+        # 不该涨。若换成随机轴后涨幅消失 ⇒ 涨的是「w 高的个体都按同一条可遗传轴排队、
+        # 因而互相靠近」这个 by-construction 的正反馈，与隔离的适应度收益无关。
+        axis = (jax.random.uniform(key, (n,)) if cfg.mate_forage_random_axis else forage)
+        rank_key = 2.0 * cls + (1.0 - w) * diet + w * axis
     order = jnp.argsort(jnp.where(want, rank_key, jnp.inf))  # wanters first
     n_want = jnp.sum(want)
     swap = jnp.arange(n) ^ 1                              # pairs (0,1) (2,3) ...
