@@ -460,6 +460,17 @@ def run_smoke(r: Report, bless: bool) -> None:
     cfg = dataclasses.replace(Config(), seed=SMOKE_SEED, **SMOKE)
     t0 = time.time()
     state, key, _step, scan_fn, terrain = new_world(cfg)
+    # **预热一次并丢弃。** 这不是性能优化，是**消除一个 6.88% 的方差源**：
+    # XLA 在进程内第一次执行时做 autotuning（挑 kernel），选出来的归约顺序与之后
+    # 不同，而逐格 scatter-add 是原子操作、对顺序敏感。实测同一配置连跑 6 次，
+    # `fruit_total` 第 1 次是 40.598、第 2–6 次全是 43.563——**首次运行是个离群值，
+    # 而 `check.py` 每次都是全新进程，测的永远是那个离群值**。
+    # `conventions.md` §9 记的「五次运行漂移 0.000%」是在同一进程内测的，
+    # 因此**恰好错过了这个方差源**；golden 的 ±2% band 也就定标在了一个
+    # 比真实散布窄 3 倍的尺度上。
+    # 预热之后测量总是落在「已 autotuned」的状态，band 才有意义。
+    _ws, _wk, _wm = scan_fn(state, key, 1)
+    jax.block_until_ready(_wm)
     state, key, ms = scan_fn(state, key, SMOKE_STEPS)
     jax.block_until_ready(ms)
     print(f"  ({SMOKE_STEPS} steps on n_max={cfg.n_max} in {time.time() - t0:.1f}s "

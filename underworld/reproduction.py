@@ -152,7 +152,31 @@ def _assortative_mate(want: jax.Array, diet: jax.Array, cfg: Config,
         # 不该涨。若换成随机轴后涨幅消失 ⇒ 涨的是「w 高的个体都按同一条可遗传轴排队、
         # 因而互相靠近」这个 by-construction 的正反馈，与隔离的适应度收益无关。
         axis = (jax.random.uniform(key, (n,)) if cfg.mate_forage_random_axis else forage)
-        rank_key = 2.0 * cls + (1.0 - w) * diet + w * axis
+        if cfg.mate_forage_heritable:
+            # **等方差混合（R19 必需，§22.4e）。** 直接写 `(1−w)·diet + w·axis` 有一个
+            # by-construction 的假阳性：食草者内部 `diet` 只散布 **0.035**，而 `axis`
+            # 散布 0.3–1.0，**于是 `w` 越大，这个体的 key 被甩得越远**。排序之后
+            # `w≈0` 的个体全挤在中间、高 `w` 的个体落在两端——**两端只有其他高 `w` 个体，
+            # 它们因此互相配对、后代继承高 `w`，形成与隔离收益无关的正反馈。**
+            # 实测（§22.4d 的四臂探针，20k 步）：即使把 axis 换成**纯随机数**，
+            # `mean gene` 仍涨 +0.267（MDE 才 0.176）；只有关掉同型交配才不涨（−0.065）。
+            # 秩变换把两个轴都压成 [0,1] 上的均匀分布 ⇒ `w` 不再改变 key 的散布。
+            # ⚠️ 光做秩变换**还不够**，实测会把假信号翻成反向的（−0.25）：
+            # 两个**独立**轴线性混合时 `Var((1−w)X + wY) = ((1−w)² + w²)·Var`，
+            # 它在 w=0 时是 1、w=0.5 时只有 0.5——**高 w 的个体反而挤在队列中间，
+            # 于是换成低 w 的个体落在两端互相配对，把 w 压下去。**
+            # 「线性混合两个独立轴」这个形式**本身就做不到方差对 w 恒定**，
+            # 必须再除以 `sqrt((1−w)² + w²)`。除完之后 w=0 仍恰好是 `rank(diet)`、
+            # w=1 仍恰好是 `rank(axis)`，语义不变；key 的上界 1/√0.5≈1.41 < 2，
+            # 所以 `2·cls` 仍然分得开食草者与食肉者。
+            def _rank01(x):
+                return jnp.argsort(jnp.argsort(x)).astype(jnp.float32) / max(n - 1.0, 1.0)
+            norm = jnp.sqrt(jnp.square(1.0 - w) + jnp.square(w))
+            rank_key = 2.0 * cls + ((1.0 - w) * _rank01(diet) + w * _rank01(axis)) / norm
+        else:
+            # R17 的常量路径**原样不动**：所有个体共用一个 `w`，个体间没有散布差异，
+            # 上面那个副产物按构造不存在，所以它的已发表结论不受影响。
+            rank_key = 2.0 * cls + (1.0 - w) * diet + w * axis
     order = jnp.argsort(jnp.where(want, rank_key, jnp.inf))  # wanters first
     n_want = jnp.sum(want)
     swap = jnp.arange(n) ^ 1                              # pairs (0,1) (2,3) ...
