@@ -93,7 +93,8 @@ def load(d, pre):
         if np.isfinite(carn) and carn < 0.005:
             dead.append(f.split("/")[-1][:-4])
     cells = {s: tuple(np.nanmean([x[i] for x in v]) for i in range(6)) for s, v in per.items()}
-    return cells, dead
+    runs = [(s, x[0], x[2]) for s, v in per.items() for x in v]   # (seed, low_mass, carn末帧)
+    return cells, dead, runs
 
 
 def main():
@@ -101,9 +102,11 @@ def main():
     print("R21 判决：捕食压力的剂量曲线（判据 `multispecies_program.md` §28）")
     print("=" * 92)
     rows, deads = [], {}
+    allruns = {}
     for dd, d, pre in ARMS:
-        C, dead = load(d, pre)
+        C, dead, runs = load(d, pre)
         deads[dd] = dead
+        allruns[dd] = runs
         if not C:
             print(f"  diet_delta={dd}: 无数据"); continue
         a = np.array([list(v) for v in C.values()], float)   # [格, 6]
@@ -163,6 +166,28 @@ def main():
         print(f"    diet_delta={dd_:.2f}: {len(d_)} 个" + (f"  {d_}" if d_ else ""))
     print("    ⚠️ R20 漏报了 5/72，而那 4 个恰是该格 `low_mass` 最高的种子——"
           "本轮逐档核对，避免同一失误。")
+
+    # ---- H3 拆分：跃升到底是「压力过阈」还是「捕食者灭绝」 ----
+    # **事后、非配对的描述性拆分，不是假设检验**：分组变量（捕食者是否存活）是结果不是
+    # 处理，拆完两组已不再配对，所以只报均值与 n，不报 p。
+    # 但它是判决的关键：H1 认定的跃升发生在 0.70→0.80，而 0.80 档恰好是捕食者开始
+    # 大批灭绝的那一档（15/24）。这两件事必须分开看。
+    print("\n  **跃升是「压力过阈」还是「捕食者灭绝」**（事后拆分，描述性）")
+    print(f"{'diet_delta':>10} {'捕食者仍在':>22} {'捕食者已灭绝':>22}")
+    for dd_, _, _ in rows:
+        rs = allruns[dd_]
+        alive_ = [lm for _, lm, cf in rs if np.isfinite(cf) and cf >= 0.005]
+        gone_ = [lm for _, lm, cf in rs if not (np.isfinite(cf) and cf >= 0.005)]
+        fa = f"{np.mean(alive_):.4f} (n={len(alive_)})" if alive_ else "—"
+        fg = f"{np.mean(gone_):.4f} (n={len(gone_)})" if gone_ else "—"
+        print(f"{dd_:>10.2f} {fa:>22} {fg:>22}")
+    A = [lm for dd_ in [d for d, _, _ in rows if d < 1.4] for _, lm, cf in allruns[dd_]
+         if np.isfinite(cf) and cf >= 0.005]
+    Gq = [lm for dd_ in [d for d, _, _ in rows if d < 1.4] for _, lm, cf in allruns[dd_]
+          if not (np.isfinite(cf) and cf >= 0.005)]
+    print(f"\n    全部有捕食处理的 run 合并：捕食者仍在 **{np.mean(A):.4f}** (n={len(A)}) "
+          f"vs 已灭绝 **{np.mean(Gq):.4f}** (n={len(Gq)})")
+    print(f"    无捕食对照臂（diet_delta=1.50）：{np.mean([lm for _, lm, _ in allruns[1.50]]):.4f}")
 
 
 if __name__ == "__main__":
