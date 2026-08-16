@@ -30,6 +30,7 @@ h1{font-size:22px;margin:0 0 6px;font-weight:650}
 .ptitle{font-weight:650;margin-bottom:2px}
 .pnote{color:var(--dim);font-size:13px;margin-bottom:12px;min-height:20px}
 canvas{width:100%;height:190px;display:block;background:#0b0f14;border-radius:6px}
+canvas.spark{height:54px;margin-top:8px}
 .stats{display:flex;gap:18px;margin-top:10px;font-size:13px;flex-wrap:wrap}
 .stat b{font-variant-numeric:tabular-nums;font-size:16px}
 .fruit{color:var(--fruit)} .grass{color:var(--grass)} .dim{color:var(--dim)}
@@ -61,6 +62,7 @@ input[type=range]{flex:1;accent-color:var(--fruit)}
 <div class="legend">
   <span><i class="sw" style="background:var(--fruit)"></i>偏爱果子</span>
   <span><i class="sw" style="background:var(--grass)"></i>偏爱草</span>
+  <span class="dim">面板下方的细曲线是<b>偏果占比的全程走势</b>（虚线为 50%），竖线是当前位置。</span>
   <span class="dim">两边按<b>世代比例</b>对齐——有捕食者的世界代际更替快得多，
         同样的步数它经历的世代数是另一边的三倍。</span>
 </div>
@@ -73,12 +75,13 @@ input[type=range]{flex:1;accent-color:var(--fruit)}
 <script>
 const DATA = __DATA__;
 const P = DATA.panels, NB = DATA.bins;
-const cvs = [], ctxs = [], els = [];
+const cvs = [], ctxs = [], els = [], sparks = [], sctxs = [];
 const host = document.getElementById('panels');
 P.forEach((p,i)=>{
   const d = document.createElement('div'); d.className='panel';
   d.innerHTML = `<div class="ptitle">${p.title}</div><div class="pnote">${p.note}</div>
     <canvas id="c${i}"></canvas>
+    <canvas id="s${i}" class="spark"></canvas>
     <div class="stats">
       <span class="stat dim">第 <b id="g${i}" class="fg">–</b> 代</span>
       <span class="stat fruit">偏果的占 <b id="lo${i}">–</b></span>
@@ -87,10 +90,12 @@ P.forEach((p,i)=>{
   host.appendChild(d);
   const c = document.getElementById('c'+i);
   cvs.push(c); ctxs.push(c.getContext('2d'));
+  const sp = document.getElementById('s'+i);
+  sparks.push(sp); sctxs.push(sp.getContext('2d'));
   els.push({g:document.getElementById('g'+i), lo:document.getElementById('lo'+i),
             n:document.getElementById('n'+i)});
 });
-function fit(){ cvs.forEach(c=>{ const r=c.getBoundingClientRect(), dpr=devicePixelRatio||1;
+function fit(){ [...cvs,...sparks].forEach(c=>{ const r=c.getBoundingClientRect(), dpr=devicePixelRatio||1;
   c.width=r.width*dpr; c.height=r.height*dpr; }); draw(cur); }
 // 柱子颜色：从琥珀(偏果)渐变到绿(偏草)
 function barColor(k){
@@ -116,6 +121,26 @@ function draw(frac){
     els[i].g.textContent = f.g.toFixed(0);
     els[i].lo.textContent = (f.lo*100).toFixed(1)+'%';
     els[i].n.textContent = f.n.toLocaleString();
+  });
+  // 全程曲线：果侧占比随世代——不拖进度条也能一眼看到走势
+  P.forEach((p,i)=>{
+    const ctx=sctxs[i], c=sparks[i], dpr=devicePixelRatio||1;
+    const W=c.width, H=c.height, pad=4*dpr;
+    ctx.clearRect(0,0,W,H);
+    // 0.5 参考线
+    ctx.strokeStyle='#30363d'; ctx.lineWidth=1*dpr; ctx.setLineDash([3*dpr,3*dpr]);
+    ctx.beginPath(); ctx.moveTo(0,H-pad-(H-pad*2)*0.5); ctx.lineTo(W,H-pad-(H-pad*2)*0.5); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle='#e8a33d'; ctx.lineWidth=2*dpr; ctx.beginPath();
+    p.frames.forEach((f,k)=>{
+      const x=pad+(W-pad*2)*k/(p.frames.length-1), y=H-pad-(H-pad*2)*Math.min(f.lo,1);
+      k?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    });
+    ctx.stroke();
+    const idx=Math.min(p.frames.length-1, Math.round(frac*(p.frames.length-1)));
+    const cx=pad+(W-pad*2)*idx/(p.frames.length-1);
+    ctx.strokeStyle='#e6edf3'; ctx.lineWidth=1*dpr; ctx.globalAlpha=.55;
+    ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke(); ctx.globalAlpha=1;
   });
   const g0 = P[0].frames[Math.min(P[0].frames.length-1, Math.round(frac*(P[0].frames.length-1)))].g;
   document.getElementById('gnow').textContent = '第 '+g0.toFixed(0)+' 代';
