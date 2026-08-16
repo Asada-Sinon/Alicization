@@ -86,7 +86,8 @@ input[type=range]{flex:1;accent-color:var(--fruit)}
 .foot code{background:#21262d;padding:1px 5px;border-radius:4px;font-size:12px}
 </style></head><body><div class="wrap">
 <h1>两种吃法的食草者，各自待在地图的哪里</h1>
-<p class="sub">每个点是一只活着的食草者，颜色是它偏爱吃草还是吃果子。
+<p class="sub">每个点是一只活着的个体：<b>绿到琥珀</b>的是食草者（颜色表示它偏爱吃草还是吃果子），
+<b>红的是食肉者</b>。
 底图是这个世界本身：<b>暗琥珀的地方长果子</b>（只长在林冠下）、绿的地方长草、蓝的是水。
 所以「吃果子的有没有聚在长果子的地方」可以直接看出来。拖动进度条看它随世代变化。
 下方的小直方图由同一帧的同一批个体现算，因此地图和直方图永远同步。</p>
@@ -102,6 +103,7 @@ input[type=range]{flex:1;accent-color:var(--fruit)}
 <div class="legend">
   <span><i class="sw" style="background:var(--fruit)"></i>偏爱果子</span>
   <span><i class="sw" style="background:var(--grass)"></i>偏爱草</span>
+  <span><i class="sw" style="background:#f24038"></i>食肉者</span>
   <span><i class="sw" style="background:rgb(85,65,34)"></i>果子长在这（林冠下）</span>
   <span><i class="sw" style="background:rgb(27,75,47)"></i>草长在这</span>
   <span><i class="sw" style="background:rgb(32,74,138)"></i>水</span>
@@ -114,12 +116,20 @@ input[type=range]{flex:1;accent-color:var(--fruit)}
 （画布上已经很密），显示的「存活」是抽样前的真实数。两臂除 <code>diet_delta</code>
 外配置完全相同，与 <code>docs/multispecies_feasibility.md</code> §27 的
 <code>wn1off</code> / <code>wn1on</code> 两臂一致。直方图的分界与判决同口径：
-<code>forage_pref &lt; 0.35</code> 记为果专精侧。
+<code>forage_pref &lt; 0.35</code> 记为果专精侧，
+且<b>所有比例都只在食草者里算</b>（<code>diet &lt; 0.35</code>，与
+<code>trajectory.py</code> 判决用的口径一致）——食肉者的 <code>forage_pref</code>
+没有意义，混进去会把这个数算错。食性介于两者之间的个体画成灰点，两边都不计入。
 </div>
 </div>
 <script>
 const DATA = __DATA__;
 const NB = 20, LO_CUT = 0.35;
+// 与判决同口径：`trajectory.py` 的 `herb = alive & (diet < 0.35)`，
+// 食肉者判定沿用 `metrics.py` 的 `is_carn = diet > 0.65`。
+// **食草者以外的个体绝不能进直方图**——它们的 `forage_pref` 没有意义。
+const HERB_MAX = 0.35, CARN_MIN = 0.65;
+const CARN_COLOR = '#f24038';   // 与 web/render.js 的食肉者色一致
 function unb64(s){ const b=atob(s), u=new Uint8Array(b.length);
   for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }
 function u16(s){ const u=unb64(s); return new Uint16Array(u.buffer, u.byteOffset, u.length/2); }
@@ -147,7 +157,7 @@ const P = DATA.panels.map(p=>{
   // 每帧的性状先解一次并缓存——拖进度条时不要反复 atob
   const frames = p.frames.map(f=>({
     t:f.t, g:f.g, n:f.n,
-    x:u16(f.x), y:u16(f.y), p:unb64(f.p),
+    x:u16(f.x), y:u16(f.y), p:unb64(f.p), d:unb64(f.d),
   }));
   return {title:p.title, note:p.note, terr:off, tg:g, frames, world:p.world, fcap:FCAP};
 });
@@ -163,6 +173,7 @@ P.forEach((p,i)=>{
       <span class="stat dim">第 <b id="g${i}">–</b> 代</span>
       <span class="stat fruit">偏果的占 <b id="lo${i}">–</b></span>
       <span class="stat dim">存活 <b id="n${i}">–</b></span>
+      <span class="stat" style="color:#f24038">食肉者 <b id="c${i}">–</b></span>
     </div>
     <div class="stats" style="margin-top:4px">
       <span class="stat dim">站在果子地上的比例：<b id="of${i}" class="fruit">–</b>
@@ -173,7 +184,8 @@ P.forEach((p,i)=>{
   maps.push(document.getElementById('m'+i));
   hists.push(document.getElementById('h'+i));
   els.push({g:document.getElementById('g'+i), lo:document.getElementById('lo'+i),
-            n:document.getElementById('n'+i), of:document.getElementById('of'+i),
+            n:document.getElementById('n'+i), c:document.getElementById('c'+i),
+            of:document.getElementById('of'+i),
             og:document.getElementById('og'+i)});
 });
 
@@ -189,19 +201,43 @@ function draw(frac){
     ctx.drawImage(p.terr, 0, 0, Wd, Hd);
     // 个体：点大小随画布，偏果的画在上层，免得被绿点盖住看不出聚集
     const rad = Math.max(1.6, Wd/260);
-    const order = Array.from(f.p.keys()).sort((a,b)=>f.p[b]-f.p[a]);
+    // 画序：偏草的最先、偏果的其次、食肉者最后（画在最上层）。
+    // 食肉者数量少但要看得见，食草者里偏果的少、要能看出聚集。
+    const order = Array.from(f.p.keys()).sort((a,b)=>{
+      const ca = f.d[a]/255 > CARN_MIN, cb = f.d[b]/255 > CARN_MIN;
+      if(ca !== cb) return ca ? 1 : -1;
+      return f.p[b]-f.p[a];
+    });
     for(const k of order){
-      const t = f.p[k]/255;
-      ctx.fillStyle = ramp(t); ctx.globalAlpha = 0.85;
-      ctx.beginPath();
-      ctx.arc(f.x[k]/65535*Wd, f.y[k]/65535*Hd, rad, 0, 6.2832);
-      ctx.fill();
+      const dv = f.d[k]/255;
+      if(dv > CARN_MIN){                       // 食肉者：红点，稍大
+        ctx.fillStyle = CARN_COLOR; ctx.globalAlpha = 0.95;
+        ctx.beginPath();
+        ctx.arc(f.x[k]/65535*Wd, f.y[k]/65535*Hd, rad*1.35, 0, 6.2832);
+        ctx.fill();
+      } else if(dv < HERB_MAX){                // 食草者：按觅食偏好上色
+        ctx.fillStyle = ramp(f.p[k]/255); ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.arc(f.x[k]/65535*Wd, f.y[k]/65535*Hd, rad, 0, 6.2832);
+        ctx.fill();
+      } else {                                 // 中间食性：灰点，不参与任何统计
+        ctx.fillStyle = '#6e7681'; ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(f.x[k]/65535*Wd, f.y[k]/65535*Hd, rad*0.8, 0, 6.2832);
+        ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
     // 同一帧现算直方图
-    const h = new Array(NB).fill(0); let lo=0;
-    for(let k=0;k<f.p.length;k++){ const v=f.p[k]/255;
-      h[Math.min(NB-1, Math.floor(v*NB))]++; if(v<LO_CUT) lo++; }
+    const h = new Array(NB).fill(0); let lo=0, nherb=0, ncarn=0;
+    for(let k=0;k<f.p.length;k++){
+      const dv=f.d[k]/255;
+      if(dv > CARN_MIN){ ncarn++; continue; }
+      if(dv >= HERB_MAX) continue;              // 中间食性：两边都不算
+      nherb++;
+      const v=f.p[k]/255;
+      h[Math.min(NB-1, Math.floor(v*NB))]++; if(v<LO_CUT) lo++;
+    }
     const hc = hists[i], hx = hc.getContext('2d'), HW=hc.width, HH=hc.height;
     hx.clearRect(0,0,HW,HH);
     const pk = Math.max(...h, 1), pad=4*(devicePixelRatio||1), bw=(HW-pad*2)/NB;
@@ -216,6 +252,8 @@ function draw(frac){
     const G = p.tg, FC = p.fcap;
     let nf=0, nfOn=0, ng=0, ngOn=0;
     for(let k=0;k<f.p.length;k++){
+      const dv = f.d[k]/255;
+      if(dv >= HERB_MAX) continue;              // 食肉者与中间食性都不算
       const v = f.p[k]/255;
       const ix = Math.min(G-1, Math.floor(f.x[k]/65536*G));
       const iy = Math.min(G-1, Math.floor(f.y[k]/65536*G));
@@ -226,8 +264,9 @@ function draw(frac){
     els[i].of.textContent = nf ? (nfOn/nf*100).toFixed(0)+'%' : '—';
     els[i].og.textContent = ng ? (ngOn/ng*100).toFixed(0)+'%' : '—';
     els[i].g.textContent = f.g.toFixed(0);
-    els[i].lo.textContent = (lo/f.p.length*100).toFixed(1)+'%';
+    els[i].lo.textContent = nherb ? (lo/nherb*100).toFixed(1)+'%' : '—';
     els[i].n.textContent = f.n.toLocaleString();
+    els[i].c.textContent = (ncarn/f.p.length*100).toFixed(1)+'%';
   });
   const f0 = P[0].frames[Math.min(P[0].frames.length-1, Math.round(frac*(P[0].frames.length-1)))];
   document.getElementById('gnow').textContent = (f0.t/1000).toFixed(0)+'k 步';
