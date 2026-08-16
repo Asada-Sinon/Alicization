@@ -32,3 +32,6 @@ explorations/**/output/
 # 个人版 CLAUDE.md 覆盖，只对自己生效；团队共享的是 CLAUDE.md 本身。
 CLAUDE.local.md
 .playwright-mcp/
+
+# 地图回放的原始录制数据：几 MB、可由 record_map.py 重跑，性质等同 outputs/
+explorations/*/map_*_s*.json
