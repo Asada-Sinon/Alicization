@@ -720,3 +720,17 @@
   ——真实的口径差异极少恰好为 0；③写这类 helper 时不要用「最后一个 return 当默认」。
 - 来源: Session 2026-08-17（R21 §30.1 的三口径检查）
 
+### [LEARN:tooling] **`pkill -f <模式>` 会匹配到发起它的那条命令自己**
+- 现象: 停实时仪表盘时写 `pkill -f "run_live.py"`，**整条 Bash 调用被自己杀掉**
+  （退出码 144），服务器停没停还得另外查。换成 `pgrep -f "python -u scripts/run_live"`
+  再 kill，**同样自杀**——因为模式串本身就在命令行里。一晚上栽了三次。
+- 原因: `-f` 匹配的是**完整命令行**，而发起 pkill 的 shell 的命令行里就含着那个模式。
+  更隐蔽的一次：命令里还有个 python heredoc，**heredoc 正文里出现的 `run_live.py`
+  也算命令行的一部分**，于是连字符类技巧 `run_l[i]ve` 都被绕过了。
+- 对策: ①**用字符类打断字面量**：`pgrep -f "run_l[i]ve"` ——但**同一条命令里别再出现
+  该字面量**（包括 heredoc 正文、要写进文件的文本）；②更稳的是**单独一次调用只做 kill**，
+  不夹带任何别的内容；③本仓库停仪表盘可直接用
+  `ps -eo pid,cmd | grep -E "scripts/run_.ive\\.py" | grep -v grep`；
+  ④杀完**一定要验**（`curl` 端口 / `nvidia-smi` 显存），别信退出码。
+- 来源: Session 2026-08-17（着色器验收起停 `run_live.py`）
+

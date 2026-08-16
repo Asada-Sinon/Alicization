@@ -224,3 +224,33 @@ v10 把 `diet`+`energy` 并成 `vec2` 这一步，正是第一次让这个洞可
 > （中性 6% vs 6.1%、`R38n` 46% vs 45.0%），而两者的实现**没有共享一行代码**
 > ——一边是 Python 读 JSON 里的直方图，一边是 JS 读二进制 wire。
 > **这比任何「看起来对」都强。**
+
+## 9. 2026-08-17 复验：面板确实能实时看到分裂，**但默认世界看不到**
+
+§8 的面板做完之后，一直没人在**真的会分裂的世界**上看过它——验收用的是默认配置，
+而默认配置**不产生生态型分化**（那是九项干预累积出来的，`multispecies_feasibility.md`
+§10–§18）。所以「面板能显示分裂」此前只是推理，不是观察。
+
+**[本世界实测] 复验通过。** 带上判决那一臂的完整覆盖启动：
+
+```bash
+XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/run_live.py --speed 50 \
+  --set fruit_energy=4.0 --set fruit_water_frac=0.40 --set plant_max=2.0 \
+  --set water_sea_dist=1 --set grass_shade=1.3 --set forage_tradeoff=1.0 \
+  --set forage_curvature=1.0 --set eat_rate=0.5 --set ridge_wavenumber=1 \
+  --set fruit_regrow_baseline=0.25 --set regrow_baseline=0.010 --set diet_delta=1.5
+```
+
+约 **150 秒**后（`--speed 50`，种群 5426、平均年龄 847）截图所见：
+- 面板读数 **47% 偏果**，直方图**明确两个峰、中间空白**；
+- **世界里同时可见**：橙色个体聚成一簇簇扎在结果子的斑块上，绿色散在开阔处
+  ——与 `explorations/20260816-replay/map.html` 的「偏果的 77–85% 站在果子地上」
+  是同一件事的两种呈现。
+
+对照：**默认配置**跑同一个面板，读数 6% 偏果、单峰。⇒ **面板没问题，是世界的问题。**
+
+⚠️ **因此凡是让人「跑 `run_live.py` 看分化」的说明，都必须带上这十二项覆盖**
+（`explorations/20260816-replay/index.html` 初版漏了，已修）。
+删掉最后的 `--set diet_delta=1.5` 就把捕食者放回来，几分钟内橙色那一支消失
+——这是 §27/§30 判决最省事的现场演示。
+

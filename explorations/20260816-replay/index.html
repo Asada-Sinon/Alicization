@@ -89,12 +89,29 @@ code{background:#21262d;padding:1px 6px;border-radius:5px;font-size:13.5px}
 <h2>这些页面是什么</h2>
 <p>都是<b>已经跑完的模拟</b>的回放，不是实时演算——所以双击就能打开，不需要显卡，
 也不需要起服务器。数据直接内嵌在页面里。</p>
-<p>想看实时的，在仓库根目录跑下面这行，然后浏览器开 <code>localhost:8000</code>，
-那是真的在算：</p>
+
+<h2>想看实时的</h2>
+<p>在仓库根目录跑下面这行，然后浏览器开 <code>localhost:8000</code>。
+<b>大约两三分钟</b>就能看到族群分裂：右下角的直方图长出两个峰，
+同时地图上会出现一团团橙色——那是吃果子的个体自己聚到了结果子的地方。</p>
 <pre style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px 16px;
-overflow-x:auto;font-size:13.5px;margin:0 0 14px"><code>XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/run_live.py</code></pre>
-<p style="font-size:14.5px;color:var(--dim)">前面那个环境变量<b>不能省</b>：没有它 JAX
-会先占掉显卡的 75%，下一个启动的进程就会撞上一个假的「显存不足」——实际峰值只有 918 MiB。</p>
+overflow-x:auto;font-size:13px;line-height:1.6;margin:0 0 14px"><code>XLA_PYTHON_CLIENT_PREALLOCATE=false .venv/bin/python scripts/run_live.py --speed 50 \
+  --set fruit_energy=4.0 --set fruit_water_frac=0.40 --set plant_max=2.0 \
+  --set water_sea_dist=1 --set grass_shade=1.3 --set forage_tradeoff=1.0 \
+  --set forage_curvature=1.0 --set eat_rate=0.5 --set ridge_wavenumber=1 \
+  --set fruit_regrow_baseline=0.25 --set regrow_baseline=0.010 --set diet_delta=1.5</code></pre>
+
+<div class="caveat">
+<b>那一长串参数不是装饰。</b>直接跑 <code>run_live.py</code>（默认世界）
+<b>是看不到分化的</b>——这个分化是九项干预累积出来的结果，不是这个沙盒开箱即有的性质。
+上面这些覆盖就是判决里那个世界的完整配置，一项不少。<br>
+<b>想看捕食者把它压掉：把最后那个 <code>--set diet_delta=1.5</code> 删掉再跑一次。</b>
+那一项是「关掉捕食」的开关，去掉它捕食者就回来了，几分钟内橙色那一支会整个消失。
+</div>
+
+<p style="font-size:14.5px;color:var(--dim)">开头那个环境变量<b>不能省</b>：没有它 JAX
+会先占掉显卡的 75%，下一个启动的进程就会撞上一个假的「显存不足」——实际峰值只有 918 MiB。
+<code>--speed 50</code> 是每帧推进多少步（时间加速），调大更快但画面会跳。</p>
 
 <div class="foot">
 Underworld — 一个受《刀剑神域 · Alicization》的人工摇光启发的 GPU 原生人工生命沙盒。
