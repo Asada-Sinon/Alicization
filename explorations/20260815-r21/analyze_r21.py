@@ -33,7 +33,7 @@ sys.path.insert(0, "explorations/20260805-r18-verdict")
 
 import numpy as np
 from diag_h2_degenerate import parts, CTR
-from exp_stats import bootstrap_ci
+from exp_stats import RunSet, bootstrap_ci, paired
 from neutral_null import gen_weights
 
 LOW = CTR < 0.35
@@ -95,6 +95,68 @@ def load(d, pre):
     cells = {s: tuple(np.nanmean([x[i] for x in v]) for i in range(6)) for s, v in per.items()}
     runs = [(s, x[0], x[2]) for s, v in per.items() for x in v]   # (seed, low_mass, carn末帧)
     return cells, dead, runs
+
+
+def _lm_metric(rec):
+    """末 1/4（按世代加权）的 `low_mass`——与主表同一个量。"""
+    tr = rec["traj"]
+    g = np.array([q["generation"] for q in tr], float)
+    H = np.array([q["hist"] for q in tr], float)
+    lm = np.array([h[LOW].sum() / max(h.sum(), 1.0) for h in H])
+    return wmean(lm, g, g >= g.max() * 0.75)
+
+
+def _carn_metric(rec):
+    """末帧 `carn_frac`：traj 末点常为 NaN，取最后一个有限值（实测全部落在 t=100000）。"""
+    cf = [q.get("carnivore_frac") for q in rec["traj"]]
+    cf = [x for x in cf if x is not None and np.isfinite(x)]
+    return float(cf[-1]) if cf else np.nan
+
+
+def effect_noise():
+    """§28.4 要求的「效应 ÷ 配对差噪声」。
+
+    **必须走 `exp_stats.paired`，不许在这里重推算术**——CLAUDE.md 明写这条，
+    而本轮第一版判决就是自己推了一遍噪声公式，得出的比值与共享实现差近两倍。
+    """
+    ARM_DIR = {f"dd{int(dd*100):03d}": (d, pre) for dd, d, pre in ARMS}
+    recs, srcs = {}, {}
+    dropped = []
+    for arm, (d, pre) in ARM_DIR.items():
+        for f in sorted(glob.glob(f"{d}/{pre}_s*_r*.log")):
+            txt = open(f).read()
+            if "JSON " not in txt:
+                continue
+            js = json.loads(txt.split("JSON ")[1].split("\n")[0])
+            base = f.split("/")[-1][:-4]
+            sd = int(base.split("_")[1][1:]); rp = int(base.split("_")[2][1:])
+            if js["collapsed"]:
+                dropped.append(base); continue
+            recs[(arm, sd, rp)] = js
+            srcs[(arm, sd, rp)] = base
+    seeds = sorted({k[1] for k in recs}); reps = sorted({k[2] for k in recs})
+    # `exp_stats` 要求格子完整（r=2 都在），崩溃的 run 会打出洞。
+    # **不补不填**：把有洞的臂整个排除在本段之外，并明说排除了谁——
+    # 那个格失去的正是自估噪声的能力，而 r=2 存在的唯一理由就是自估噪声。
+    full = [a for a in sorted(ARM_DIR)
+            if all((a, sd, rp) in recs for sd in seeds for rp in reps)]
+    holed = [a for a in sorted(ARM_DIR) if a not in full]
+    if dropped:
+        print(f"    ⚠️ 崩溃 run：{dropped} ⇒ 臂 {holed} 有不完整的格，"
+              f"**本段排除**（主表仍按格均值计入）")
+    rs = RunSet({k: v for k, v in recs.items() if k[0] in full},
+                {k: v for k, v in srcs.items() if k[0] in full}, full, seeds, reps)
+    for a, b, lab, mt, nm in [
+            ("dd080", "dd070", "low_mass 0.70→0.80（H1 认定的跃升）", _lm_metric, "low_mass"),
+            ("dd060", "dd015", "low_mass 0.15→0.60（§29.3 的平台）", _lm_metric, "low_mass"),
+            ("dd070", "dd015", "low_mass 0.15→0.70（0.70 是否仍在平台内）", _lm_metric, "low_mass"),
+            ("dd070", "dd015", "carn_frac 0.15→0.70（密度是否随门槛变）", _carn_metric, "carn_frac"),
+            ("dd080", "dd015", "carn_frac 0.15→0.80", _carn_metric, "carn_frac")]:
+        r = paired(rs, mt, a, b, label=lab, metric_name=nm)
+        flag = "  ⚠️**功效不足**" if r.underpowered else ""
+        print(f"    {lab}\n      差 {r.diff.mean():+.4f}  95%CI [{r.ci[0]:+.4f}, {r.ci[1]:+.4f}]  "
+              f"同向 {max(r.n_pos, r.n_neg)}/{len(r.diff)}  p={r.p:.5f}  "
+              f"**比值 {r.ratio:.2f}**{flag}")
 
 
 def main():
@@ -188,6 +250,9 @@ def main():
     print(f"\n    全部有捕食处理的 run 合并：捕食者仍在 **{np.mean(A):.4f}** (n={len(A)}) "
           f"vs 已灭绝 **{np.mean(Gq):.4f}** (n={len(Gq)})")
     print(f"    无捕食对照臂（diet_delta=1.50）：{np.mean([lm for _, lm, _ in allruns[1.50]]):.4f}")
+
+    print("\n  **效应 ÷ 配对差噪声**（§28.4 要求；走 `exp_stats.paired`，不在本地重推）")
+    effect_noise()
 
 
 if __name__ == "__main__":

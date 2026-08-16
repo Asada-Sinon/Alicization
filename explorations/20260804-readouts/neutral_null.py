@@ -151,6 +151,11 @@ def gen_weights(gen, mode="iso"):
     R13 是 7/8/9（clip/iso/unif）。**报结论时三种都要给，不许挑一个用。**
     """
     g = np.asarray(gen, float)
+    # **未知模式必须报错，不许静默兜底成 iso。** 原来 `return` 兜住了一切拼写错误：
+    # 我用 `flat`/`late` 做「三种口径都给」的敏感性检查，两个名字都不存在，
+    # 于是三条曲线全是 iso，分歧「0.0000」——一个看起来最漂亮的假阴性。
+    if mode not in ("iso", "clip", "unif"):
+        raise ValueError(f"未知的世代权重口径 {mode!r}；只有 'iso' / 'clip' / 'unif'")
     if mode == "unif":
         return np.ones(len(g))
     if mode == "clip":
