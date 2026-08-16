@@ -43,7 +43,14 @@ ARMS = [(0.15, "outputs/20260813-r20", "wn1on"),
         (0.35, "outputs/20260815-r21", "dd035"),
         (0.45, "outputs/20260815-r21", "dd045"),
         (0.60, "outputs/20260815-r21", "dd060"),
+        # R21b 补的过渡带——R21 的五档全落在「捕食仍充分发生」的一侧（§29.2）
+        (0.70, "outputs/20260816-r21b", "dd070"),
+        (0.80, "outputs/20260816-r21b", "dd080"),
+        (0.90, "outputs/20260816-r21b", "dd090"),
         (1.50, "outputs/20260813-r20", "wn1off")]
+# 相邻档距不等（0.15→0.60 每档 0.10–0.15，0.90→1.50 跨 0.60），
+# **H1 的「相邻跃升」只在档距可比的区间内比**——R21 就是被这个坑判出了假阈值。
+COMPARABLE = (0.15, 0.25, 0.35, 0.45, 0.60, 0.70, 0.80, 0.90)
 CRIT = 0.25          # H2 的阈值（无捕食基准约 0.51 的一半）
 
 
@@ -113,8 +120,10 @@ def main():
 
     # ---- H1：曲线形状 ----
     print("\n  **H1 曲线是突变还是渐变**（§28.3：最大跌幅 ÷ 其余中位数 ≥3 ⇒ 有阈值）")
-    dd = np.array([r[0] for r in rows])
-    lm = np.array([r[1][:, 0].mean() for r in rows])
+    dd = np.array([r[0] for r in rows if r[0] in COMPARABLE])
+    lm = np.array([r[1][:, 0].mean() for r in rows if r[0] in COMPARABLE])
+    print(f"    （只在档距可比的区间内比：{[f'{v:.2f}' for v in dd]}——"
+          f"1.50 那档与 0.90 相隔 0.60，纳进来会造出假阈值，§29.2 的教训）")
     # 按 diet_delta 升序 = 捕食压力递减，low_mass 应递增
     step = np.diff(lm)
     print(f"    逐档 `low_mass`  {[f'{v:.4f}' for v in lm]}")
@@ -147,6 +156,9 @@ def main():
     # ---- H3：处理失效 ----
     print("\n  **H3 处理失效（末帧 `carn_frac` < 0.005 ⇒ 该 run 等于变成了无捕食臂）**")
     for dd_, a, ks in rows:
+        if dd_ >= 1.4:
+            print(f"    diet_delta={dd_:.2f}: **由构造无捕食，`carn_frac=0` 是设计不是失效，跳过**")
+            continue
         d_ = deads[dd_]
         print(f"    diet_delta={dd_:.2f}: {len(d_)} 个" + (f"  {d_}" if d_ else ""))
     print("    ⚠️ R20 漏报了 5/72，而那 4 个恰是该格 `low_mass` 最高的种子——"
