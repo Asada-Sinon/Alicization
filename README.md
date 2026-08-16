@@ -89,6 +89,11 @@ at a time.
 
 ## What we found
 
+**Look at it first:** open `explorations/20260816-replay/index.html` in a browser —
+no server, no GPU, data embedded. Two scrubbable replays of finished runs: a
+population splitting into two foraging ecotypes, and where on the map each one
+ends up living. The landing page carries the headline numbers and the caveats.
+
 The point of the sandbox is that it produces falsifiable answers, including
 unwelcome ones. Every claim below is a committed verdict with per-seed numbers,
 a pre-registered criterion written before the run, and an explicit list of what it

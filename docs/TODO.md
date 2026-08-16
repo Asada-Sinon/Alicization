@@ -64,6 +64,13 @@
 
 ### 当前主线（2026-08-02 起，用户定盘）：局部多物种生态箱 —— `docs/multispecies_program.md`
 
+**可视化产物（2026-08-17）**：`explorations/20260816-replay/index.html` 是总览入口，
+链到两个自包含回放页——`replay.html`（`forage_pref` 直方图随世代分裂）与
+`map.html`（个体位置画在地形上，带「站在果子地上的比例」逐帧读数）。
+都零 GPU、数据内嵌、双击即开；生成脚本 `build_replay.py` / `record_map.py` /
+`make_page.py` / `make_map_page.py` 同目录。原始录制 JSON 按 `.gitignore` 不入库，
+需要时重跑 `record_map.py`（约 20 分钟一臂）。
+
 用户给了长期目标「**局部的多物种生态箱演化 + 可视化结果**」并要求做成一个可反复执行的
 循环。纲领与七道闸写在 `docs/multispecies_program.md`，**回合台账在它的 §3**，
 backlog 在 §4（判决后重排）。下一个回合从 backlog 顶部取题，不要另起炉灶。
